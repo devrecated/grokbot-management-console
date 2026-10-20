@@ -16,7 +16,9 @@ RED=[(re.compile(p,re.I),r) for p,r in [
  (r"(password|passwd|pwd|secret|api[_-]?key|access[_-]?key)(\"?\s*[:=]\s*)['\"]?[^\s'\",&]{4,}",r"\1\2[REDACTED]"),
  (r"(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^\s@/]+@",r"\1://[REDACTED]@"),(r"https?://[^\s/:@]+:[^\s/@]+@","https://[REDACTED]@"),
  (r"\b[A-Fa-f0-9]{40,}\b","[REDACTED_HEX]")]]
+ANSI=re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 def redact(s):
+    s=ANSI.sub("",s)
     for p,r in RED: s=p.sub(r,s)
     return s
 LVL=re.compile(r"\b(fatal|panic|critical|error|err|fail(?:ed|ure)?|warn(?:ing)?|debug|trace)\b",re.I)

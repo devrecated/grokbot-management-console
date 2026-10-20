@@ -19,7 +19,8 @@ def main():
     if not rows:
         open(CUR,"w").write(str(last)); return
     off=time.strftime("%z"); off=off[:3]+":"+off[3:]  # box-local times
-    batch=[{"ts":r[1]+off,"source":r[2],"level":r[3],"message":redact(r[4])} for r in rows if ok(r[2])]
+    import re; UTC=re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:?00)")
+    batch=[{"ts":r[1]+("Z" if UTC.search(r[4][:80]) else off),"source":r[2],"level":r[3],"message":redact(r[4])} for r in rows if ok(r[2])]
     if batch:
         env=dict(l.rstrip("\n").split("=",1) for l in open(os.path.join(DIR,".env")) if "=" in l)
         req=urllib.request.Request(env["ROUTINE_LOG_URL"].rstrip("/")+"/api/logs",data=gzip.compress(json.dumps(batch).encode()),

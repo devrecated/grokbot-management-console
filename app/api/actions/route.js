@@ -1,6 +1,7 @@
 // Dashboard routine actions (Vercel Authentication protects this route). Stores pending_action, posts to the routine thread, forwards to Grok Bot.
 import { sql, ensure, ensureMessages } from "@/lib/db";
 import { forward } from "@/lib/webhook";
+import { getSettings } from "@/lib/settings";
 export const dynamic="force-dynamic";
 const ACTIONS=["pause","resume","set_schedule","change_trigger"];
 export async function POST(req){
@@ -14,7 +15,7 @@ export async function POST(req){
     return Response.json({ok:true,cancelled:true});
   }
   if(!ACTIONS.includes(b.action)) return Response.json({error:"bad action"},{status:400});
-  const also=b.also_chat===true;
+  const also=b.also_chat===true||(await getSettings(q)).always_reply_in_chat;
   const pending={action:b.action, schedule:b.schedule||null, timing:b.timing||null, human:String(b.human||b.action).slice(0,300), trigger_request:b.trigger_request?String(b.trigger_request).slice(0,2000):null};
   if(b.action==="set_schedule"&&!/^\S+ \S+ \S+ \S+ \S+$/.test(pending.schedule||"")) return Response.json({error:"schedule must be a 5-field cron"},{status:400});
   if(b.action==="change_trigger"&&!pending.trigger_request) return Response.json({error:"trigger_request required"},{status:400});

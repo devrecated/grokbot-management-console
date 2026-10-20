@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})+" ET";
-export default function Chat({routines}){
+export default function Chat({routines,alwaysChat}){
   const [threads,setThreads]=useState([]),[tid,setTid]=useState(null),[msgs,setMsgs]=useState([]);
   const [text,setText]=useState(""),[bot,setBot]=useState(""),[rid,setRid]=useState(""),[busy,setBusy]=useState(false),[note,setNote]=useState(""),[also,setAlso]=useState(false);
   const end=useRef(null);
-  useEffect(()=>{const t=new URLSearchParams(location.search).get("thread"); if(t) setTid(t); setAlso(localStorage.getItem("alsoChat")==="1");},[]);
+  useEffect(()=>{const t=new URLSearchParams(location.search).get("thread"); if(t) setTid(t);},[]);
   const bots=[...new Set(routines.map(r=>r.bot))].sort();
   async function load(){
     const r=await fetch(`/api/chat${tid?`?thread_id=${encodeURIComponent(tid)}`:""}`,{cache:"no-store"}); if(!r.ok) return;
@@ -32,7 +32,7 @@ export default function Chat({routines}){
         <select value={rid} onChange={e=>setRid(e.target.value)}><option value="">Any routine</option>{routines.filter(r=>!bot||r.bot===bot).map(r=><option key={r.routine_id} value={r.routine_id}>{r.name}</option>)}</select></div>}
       {cur&&<div className="muted" style={{marginBottom:6}}>{cur.bot||"Any bot"}{cur.routine_id?` · ${cur.routine_id}`:""}</div>}
       <div className="compose"><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Message Grok Bot" onKeyDown={e=>{if(e.key==="Enter"&&(e.metaKey||e.ctrlKey))send();}}/>
-        <label style={{display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><input type="checkbox" checked={also} onChange={e=>{setAlso(e.target.checked);localStorage.setItem("alsoChat",e.target.checked?"1":"0");}}/>Also reply in Grok Bot chat</label>
+        {alwaysChat?<a href="/settings" className="muted" style={{whiteSpace:"nowrap",alignSelf:"center"}}>Replies also go to Grok Bot chat</a>:<label style={{display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><input type="checkbox" checked={also} onChange={e=>setAlso(e.target.checked)}/>Also this message</label>}
         <button disabled={busy||!text.trim()} onClick={send}>Send</button></div>
       {note&&<div className="muted" style={{marginTop:6}}>{note}</div>}
     </div></div>;

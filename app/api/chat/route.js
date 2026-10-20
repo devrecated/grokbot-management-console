@@ -2,6 +2,7 @@
 import { sql, ensureMessages } from "@/lib/db";
 import { randomUUID } from "crypto";
 import { forward } from "@/lib/webhook";
+import { getSettings } from "@/lib/settings";
 export const dynamic="force-dynamic";
 export async function GET(req){
   const q=sql(); await ensureMessages(q);
@@ -11,9 +12,9 @@ export async function GET(req){
   return Response.json({threads,messages});
 }
 export async function POST(req){
-  const b=await req.json(); const text=String(b.text||"").trim().slice(0,8000); const also=b.also_chat===true;
+  const b=await req.json(); const text=String(b.text||"").trim().slice(0,8000);
   if(!text) return Response.json({error:"text required"},{status:400});
-  const q=sql(); await ensureMessages(q);
+  const q=sql(); await ensureMessages(q); const also=b.also_chat===true||(await getSettings(q)).always_reply_in_chat;
   const tid=b.thread_id||randomUUID();
   let bot=b.bot||null, rid=b.routine_id||null;
   if(b.thread_id){ const [f]=await q`select bot,routine_id from messages where thread_id=${tid} order by created_at limit 1`; if(f){bot??=f.bot;rid??=f.routine_id;} }

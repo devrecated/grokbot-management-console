@@ -1,6 +1,37 @@
 {
-  "comment": "Which local log sources are shipped to the dashboard. fnmatch patterns against the source name. deny wins over allow.",
-  "allow": ["sand-*.log", "exec-daemon.log", "agent-store-fuse.log", "box-doctor.log", "egress-tunnel.log", "runs.jsonl", "registry.jsonl"],
-  "deny": ["dpkg.log", "alternatives.log", "history.log", "term.log", "chrome*", "x11vnc*", "novnc*", "xfwm4*", "plank*", "picom*", "sand-box-telemetry.log"],
-  "max_batch": 2000
+  "comment": "Which local log sources are shipped to the dashboard (fnmatch on source name; deny wins). The catalog is shipped too and shown in the (i) tooltip on /logs.",
+  "allow": ["*"],
+  "deny": [],
+  "max_batch": 5000,
+  "catalog": {
+    "tracked": [
+      {"source": "/var/log/** (dpkg.log, alternatives.log, fontconfig.log, apt/history.log, ...)", "what": "System package installs, upgrades and config changes"},
+      {"source": "/tmp/sand-*.log, /tmp/sand-window-*/", "what": "Box services: host, supervisor, desktop sessions, telemetry, cookie and session sync"},
+      {"source": "/tmp/exec-daemon.log", "what": "Command execution daemon that runs agent shell commands"},
+      {"source": "/tmp/agent-store-fuse.log", "what": "Agent store file mount"},
+      {"source": "/tmp/chrome:*.log, x11vnc:*, novnc:*, xfwm4:*, plank:*, picom:*", "what": "Desktop browser, VNC, window manager, dock and compositor output"},
+      {"source": "/tmp/sand-playwright-output/**", "what": "Browser automation console logs"},
+      {"source": "/tmp/**/*.log, *.out, *.err (builds, tests, pushes, installs)", "what": "Ad-hoc job output from agents: builds, test runs, git pushes"},
+      {"source": "~/.cache/**/*.log, ~/.npm/_logs", "what": "CLI tool debug logs (firebase, npm, ...)"},
+      {"source": "stdout/stderr of running processes", "what": "Any file a running process writes its output to, found via /proc/<pid>/fd"},
+      {"source": "kernel (dmesg)", "what": "Kernel ring buffer: boot, devices, OOM kills, segfaults"},
+      {"source": "journal", "what": "systemd journal via journalctl (currently has no journal files on this box)"},
+      {"source": "network (summary)", "what": "Once a minute: bytes in/out per interface from /proc/net/dev and socket counts plus top 5 peers from ss. No packet capture"},
+      {"source": "runs.jsonl, registry.jsonl", "what": "Grok Bot routine runs and the routine registry"}
+    ],
+    "excluded": [
+      {"what": "Shell histories, .env, *.token, *.pem/*.key, secret and credential files", "why": "They hold secrets"},
+      {"what": "Agent transcripts", "why": "Full conversation content, may include secrets and personal data"},
+      {"what": "Browser profile storage (Chrome/Playwright LevelDB *.log)", "why": "Binary site-storage databases with session data, not logs"},
+      {"what": "wtmp, btmp, lastlog and other binary files", "why": "Binary, not readable as text"},
+      {"what": "node_modules, git internals, plugin test fixtures", "why": "Not logs of this box"}
+    ],
+    "unavailable": [
+      {"what": "/var/log/private, /var/log/apt/term.log, /tmp/ovpn.log, /tmp/htb-ovpn.log", "why": "Root-only"},
+      {"what": "/dev/kmsg live stream", "why": "Not readable as a stream here; dmesg is used instead"},
+      {"what": "stdout/stderr of root or other-user processes", "why": "Needs root"},
+      {"what": "Packet capture", "why": "Needs root, and too heavy; per-minute summaries instead"}
+    ],
+    "notes": "Every line is redacted twice (on the box when collected, again before shipping). Consecutive repeated lines are collapsed. Kept 7 days, max 200k lines on the server."
+  }
 }

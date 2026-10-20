@@ -16,3 +16,6 @@ button{background:#1d2330;color:#fff;cursor:pointer}button:disabled{opacity:.5}
 .pending{background:#fff4ce;color:#9a6700;border-radius:10px;padding:2px 8px;font-size:12px;white-space:normal}.editor{background:#fafbfc}
 .badge-paused{background:#fde7e9;color:#c5221f;border-radius:10px;padding:2px 8px;font-size:12px;font-weight:600}
 .pager{display:flex;gap:8px;align-items:center;margin-top:10px}.logmsg{font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}
+.info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#1d2330;color:#fff;font:italic 600 12px Georgia,serif;cursor:help;outline:none}
+.info .tip{display:none;position:absolute;left:26px;top:-6px;z-index:10;width:520px;max-height:70vh;overflow:auto;background:#1d2330;color:#e8ebf0;font:400 12.5px system-ui,sans-serif;font-style:normal;padding:10px 14px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.info:hover .tip,.info:focus .tip,.info:focus-within .tip{display:block}.info .tip ul{margin:4px 0 8px;padding-left:18px}.info .tip li{margin:2px 0}.tip-h{font-weight:700;margin-top:4px}.info .tip .muted{color:#aab}

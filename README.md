@@ -52,13 +52,13 @@ Bearer routes expect `Authorization: Bearer $ROUTINE_LOG_TOKEN` plus the `x-verc
 
 ## Box logs
 
-`collect-logs.sh` reads new lines from `/var/log` and `/tmp/*.log` into `logs/box-logs.db` (SQLite) next to the scripts. It keeps a read offset per file, redacts anything that looks like a token, password, key, JWT or credentialed URL, deletes lines older than 30 days and caps the file at 50 MB. Shell histories, `.env` and token files, and agent transcripts are never read.
+`collect-logs.sh` reads new lines from `/var/log`, `/tmp`, tool caches, the files running processes write to, the kernel log, the journal and a per-minute network summary into `logs/box-logs.db` (SQLite) next to the scripts. It keeps a read offset per file, redacts anything that looks like a token, password, key, JWT or credentialed URL, deletes lines older than 30 days and caps the file at 50 MB. Shell histories, `.env` and token files, and agent transcripts are never read.
 
-`ship_logs.py` sends only new lines from allowlisted sources, redacted a second time, in one gzipped POST. When nothing is new it makes no request. Edit `ship-config.json` to change the allow and deny lists. Package manager, browser and VNC logs are denied by default.
+`ship_logs.py` sends only new lines from allowlisted sources, redacted a second time, in one gzipped POST. When nothing is new it makes no request. Edit `ship-config.json` to change the allow and deny lists. By default everything readable is shipped. The `catalog` block in that file feeds the (i) tooltip on the Logs page.
 
 `start-log-loop.sh` runs both every 60 seconds at the lowest CPU and IO priority. It is a plain sleep loop with no cron dependency and nothing that would keep the machine awake. Run `logs.sh sources` or `logs.sh -s exec-daemon -l error -t 2h -g timeout` to read the local copy.
 
-The server keeps 7 days and at most 50,000 log rows, pruned on each ingest.
+The server keeps 7 days and at most 200,000 log rows, pruned on each ingest.
 
 ## Security notes
 

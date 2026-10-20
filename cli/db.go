@@ -43,7 +43,7 @@ func TestDB(dsn string) (string, error) {
 	if _, err := c.Exec(ctx, "drop table grugbot_probe"); err != nil {
 		return "", fmt.Errorf("drop probe table: %s", scrub(err.Error(), dsn))
 	}
-	return fmt.Sprintf("Postgres %s, schema %s", ver, schema), nil
+	return fmt.Sprintf("Postgres %s, schema %s", strings.Fields(ver)[0], schema), nil
 }
 
 // scrub keeps passwords out of error messages.

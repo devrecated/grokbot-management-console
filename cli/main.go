@@ -142,8 +142,7 @@ func main() {
 	if err != nil {
 		var sh shown
 		if !errors.As(err, &sh) {
-			fmt.Println()
-			bad("%v", err)
+			failBox(err.Error())
 		}
 		os.Exit(1)
 	}
@@ -159,26 +158,26 @@ func login(o opts) (*Vercel, error) {
 		if o.yes || !isTTY() {
 			return nil, errors.New("set VERCEL_TOKEN (create one at https://vercel.com/account/tokens)")
 		}
-		dim("Vercel does not offer a device login for third-party tools, so grugbot uses an access token.")
-		dim("Create one at https://vercel.com/account/tokens (scope: the team you will use). It is not saved.")
+		dim("Paste a Vercel access token: https://vercel.com/account/tokens")
+		dim("It is used for this run only and never saved.")
+		fmt.Println()
 		if err := huh.NewInput().Title("Vercel token").EchoMode(huh.EchoModePassword).Value(&tok).
 			Validate(func(s string) error {
 				if len(strings.TrimSpace(s)) < 20 {
 					return errors.New("that looks too short")
 				}
 				return nil
-			}).Run(); err != nil {
+			}).WithTheme(theme).Run(); err != nil {
 			return nil, err
 		}
 		tok = strings.TrimSpace(tok)
 	}
 	v := NewVercel(tok, o.dry)
-	v.Log = func(s string) { dim("  %s", s) }
+	v.Log = func(s string) { dim("%s", s) }
 	var u User
-	if err := step("Logged in to Vercel", func() (e error) { u, e = v.Me(); return }); err != nil {
+	if err := stepD("Logged in to Vercel", func() (string, error) { var e error; u, e = v.Me(); return u.User.Username, e }); err != nil {
 		return nil, err
 	}
-	dim("  as %s", u.User.Username)
 	return v, nil
 }
 
@@ -206,7 +205,7 @@ func pickTeam(v *Vercel, o opts) (Team, error) {
 	for _, t := range teams {
 		opt = append(opt, huh.NewOption(t.Name+" ("+t.Slug+")", t.ID))
 	}
-	if err := huh.NewSelect[string]().Title("Which Vercel team?").Options(opt...).Value(&id).Run(); err != nil {
+	if err := huh.NewSelect[string]().Title("Which Vercel team?").Options(opt...).Value(&id).WithTheme(theme).Run(); err != nil {
 		return Team{}, err
 	}
 	for _, t := range teams {
@@ -225,8 +224,8 @@ func askDB(o *opts) error {
 		if o.yes || !isTTY() {
 			return errors.New("pass --db own --database-url URL, or --db neon")
 		}
-		if err := huh.NewSelect[string]().Title("Database").Description("Any Postgres works. The app only needs CREATE TABLE in one schema.").
-			Options(huh.NewOption("Use my own Postgres", "own"), huh.NewOption("Create a free Neon database through the Vercel Marketplace", "neon")).Value(&o.db).Run(); err != nil {
+		if err := huh.NewSelect[string]().Title("Where should the data live?").Description("Any Postgres works. It only needs CREATE TABLE in one schema.").
+			Options(huh.NewOption("Use my own Postgres", "own"), huh.NewOption("Create a free Neon database through the Vercel Marketplace", "neon")).Value(&o.db).WithTheme(theme).Run(); err != nil {
 			return err
 		}
 	}
@@ -237,7 +236,7 @@ func askDB(o *opts) error {
 		return errors.New("--database-url (or DATABASE_URL) is required with --db own")
 	}
 	how := "url"
-	_ = huh.NewSelect[string]().Title("How do you want to enter it?").Options(huh.NewOption("Paste a connection URL", "url"), huh.NewOption("Host, port, database, user, password", "parts")).Value(&how).Run()
+	_ = huh.NewSelect[string]().Title("How do you want to enter it?").Options(huh.NewOption("Paste a connection URL", "url"), huh.NewOption("Host, port, database, user, password", "parts")).Value(&how).WithTheme(theme).Run()
 	if how == "url" {
 		return huh.NewInput().Title("Connection URL").Description("postgres://user:password@host:5432/db?sslmode=require").EchoMode(huh.EchoModePassword).Value(&o.dbURL).
 			Validate(func(s string) error {
@@ -245,7 +244,7 @@ func askDB(o *opts) error {
 					return errors.New("should start with postgres://")
 				}
 				return nil
-			}).Run()
+			}).WithTheme(theme).Run()
 	}
 	p := DBParts{Port: "5432", SSLMode: "require"}
 	err := huh.NewForm(huh.NewGroup(
@@ -255,7 +254,7 @@ func askDB(o *opts) error {
 		huh.NewInput().Title("User").Value(&p.User),
 		huh.NewInput().Title("Password").EchoMode(huh.EchoModePassword).Value(&p.Password),
 		huh.NewSelect[string]().Title("sslmode").Options(huh.NewOptions("require", "verify-full", "disable")...).Value(&p.SSLMode),
-	)).Run()
+	)).WithTheme(theme).Run()
 	o.dbURL = p.URL()
 	return err
 }
@@ -276,7 +275,7 @@ func openBrowser(u string) {
 func waitForNeon(v *Vercel, cfg Config, o opts) error {
 	link := "https://vercel.com/marketplace/neon"
 	fmt.Println()
-	fmt.Println(cBox.Render(fmt.Sprintf("Create the Neon database in your browser:\n\n1. Open %s\n2. Install, pick team %s, create a free database\n3. Connect it to project %s (production + preview)\n\ngrugbot waits for DATABASE_URL to show up on the project.", link, cfg.TeamSlug, cfg.Project)))
+	fmt.Println(cErrBox.BorderForeground(accent).Render(fmt.Sprintf("Create the Neon database in your browser:\n\n1. Open %s\n2. Install, pick team %s, create a free database\n3. Connect it to project %s (production + preview)\n\ngrugbot waits for DATABASE_URL to show up on the project.", link, cfg.TeamSlug, cfg.Project)))
 	if !o.dry {
 		openBrowser(link)
 	}
@@ -299,7 +298,8 @@ func waitForNeon(v *Vercel, cfg Config, o opts) error {
 }
 
 func cmdInit(o opts) error {
-	banner("init" + map[bool]string{true: " (dry run: nothing changes)", false: ""}[o.dry])
+	banner("init" + map[bool]string{true: " · dry run, nothing changes", false: ""}[o.dry])
+	section("Vercel")
 	v, err := login(o)
 	if err != nil {
 		return err
@@ -309,30 +309,31 @@ func cmdInit(o opts) error {
 		return err
 	}
 	v.TeamID = team.ID
-	ok("Team %s", team.Slug)
+	ok("Team %s", cDim.Render("· ")+team.Name+cDim.Render(" ("+team.Slug+")"))
 	if o.project == "" {
 		o.project = "grugbot-console"
 		if !o.yes && isTTY() {
-			_ = huh.NewInput().Title("Project name").Value(&o.project).Run()
+			_ = huh.NewInput().Title("Project name").Value(&o.project).WithTheme(theme).Run()
 		}
 	}
+	section("Database")
 	if err := askDB(&o); err != nil {
 		return err
 	}
 	if o.db == "own" {
-		var info string
-		if err := step("Database reachable and CREATE TABLE works", func() (e error) { info, e = TestDB(o.dbURL); return }); err != nil {
+		if err := stepD("Postgres reachable, CREATE TABLE works", func() (string, error) { return TestDB(o.dbURL) }); err != nil {
 			return err
 		}
-		dim("  %s · %s", info, maskDSN(o.dbURL))
 	}
+	section("Project")
 	var p *Project
-	if err := step("Project "+o.project, func() (e error) {
+	if err := stepD("Project "+o.project, func() (string, error) {
+		var e error
 		if p, e = v.GetProject(o.project); e != nil || p != nil {
-			return e
+			return "already there, reusing it", e
 		}
 		p, e = v.CreateProject(o.project)
-		return e
+		return "created", e
 	}); err != nil {
 		return err
 	}
@@ -347,15 +348,16 @@ func cmdInit(o opts) error {
 	if o.db == "own" {
 		env["DATABASE_URL"] = o.dbURL
 	}
-	if err := step("Environment variables set ("+strings.Join(keys(env), ", ")+")", func() error { return v.SetEnv(p.ID, env) }); err != nil {
+	if err := stepD("Env vars set", func() (string, error) { return strings.Join(keys(env), ", "), v.SetEnv(p.ID, env) }); err != nil {
 		return err
 	}
-	if err := step("Vercel Authentication on", func() error { return v.Protect(p.ID) }); err != nil {
+	if err := stepD("Vercel Authentication on", func() (string, error) { return "team login required", v.Protect(p.ID) }); err != nil {
 		return err
 	}
-	if err := step("Bypass secret created for the box", func() error { return v.AddBypass(p.ID, bypass) }); err != nil {
+	if err := stepD("Bypass secret created", func() (string, error) { return "for the box scripts", v.AddBypass(p.ID, bypass) }); err != nil {
 		return err
 	}
+	section("Deploy")
 	url, err := deploy(v, cfg, o)
 	if err != nil {
 		return err
@@ -374,11 +376,15 @@ func cmdInit(o opts) error {
 				return err
 			}
 		}
-		if err := step("Console answers (login wall up, API reachable with bypass)", func() error { return smoke(url, bypass) }); err != nil {
+		if err := stepD("Console answers", func() (string, error) { return "login wall up, API reachable", smoke(url, bypass) }); err != nil {
 			return err
 		}
 	}
-	handoff(url)
+	db := "Neon (Vercel Marketplace)"
+	if o.db == "own" {
+		db = maskDSN(o.dbURL)
+	}
+	handoff(url, team.Slug, o.project, db)
 	return nil
 }
 
@@ -391,18 +397,27 @@ func keys(m map[string]string) []string {
 	return k
 }
 
-func handoff(url string) {
+func handoff(url, team, project, db string) {
+	summary("grug console is up", [][2]string{
+		{"Console", url},
+		{"Team", team},
+		{"Project", project},
+		{"Database", db},
+		{"Box secrets", boxEnvPath() + cDim.Render("  (mode 600, not printed)")},
+	}, []string{
+		"copy box secrets to " + cBold.Render("$INSTALL_DIR/.env") + " and chmod 600",
+		"git clone https://github.com/OWNER/grokbot-routines.git",
+		"INSTALL_DIR=/workspace/grugbot-console grokbot-routines/box/install.sh",
+	})
+	dim("or hand the secrets file to Grok Bot and ask it to install the box scripts")
 	fmt.Println()
-	fmt.Println(cBox.Render(cBold.Render("Console: ") + url + "\n\n" +
-		"Secrets for the box are in " + boxEnvPath() + " (mode 600).\nThey are not printed here. On the box:\n\n" +
-		"  1. copy that file to $INSTALL_DIR/.env   (chmod 600)\n" +
-		"  2. git clone https://github.com/OWNER/grokbot-routines.git\n" +
-		"  3. INSTALL_DIR=/workspace/grugbot-console grokbot-routines/box/install.sh\n\n" +
-		"Or hand the file to Grok Bot and ask it to install the GrugBot Console box scripts."))
 }
 
 // smoke checks the deploy: / without login is blocked, /api/logs with the bypass answers 401 (alive, token required).
 func smoke(url, bypass string) error {
+	if o := os.Getenv("GRUGBOT_TEST_ORIGIN"); o != "" { // tests and the docs recording: talk to the fake instead
+		url = o
+	}
 	c := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	r, err := c.Get(url + "/")
 	if err != nil {
@@ -434,7 +449,7 @@ func deploy(v *Vercel, cfg Config, o opts) (string, error) {
 	}
 	var list []File
 	var mu sync.Mutex
-	if err := step(fmt.Sprintf("Uploaded %d files", len(files)), func() error {
+	if err := stepD("Uploaded the app", func() (string, error) {
 		sem, errs := make(chan struct{}, 8), make(chan error, len(files))
 		var wg sync.WaitGroup
 		quiet := *v
@@ -457,7 +472,7 @@ func deploy(v *Vercel, cfg Config, o opts) (string, error) {
 		}
 		wg.Wait()
 		close(errs)
-		return <-errs
+		return fmt.Sprintf("%d files", len(files)), <-errs
 	}); err != nil {
 		return "", err
 	}
@@ -466,30 +481,27 @@ func deploy(v *Vercel, cfg Config, o opts) (string, error) {
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].File < list[j].File })
 	var d Deployment
-	if err := step("Deployed to production", func() (e error) {
+	if err := stepD("Production deploy ready", func() (det string, e error) {
 		if d, e = v.Deploy(cfg.Project, cfg.ProjectID, list); e != nil {
-			return e
+			return "", e
 		}
 		for i := 0; i < 120 && d.ReadyState != "READY"; i++ {
 			if d.ReadyState == "ERROR" || d.ReadyState == "CANCELED" {
-				return fmt.Errorf("build %s: see https://vercel.com/%s/%s/%s", strings.ToLower(d.ReadyState), cfg.TeamSlug, cfg.Project, d.ID)
+				return "", fmt.Errorf("build %s: see https://vercel.com/%s/%s/%s", strings.ToLower(d.ReadyState), cfg.TeamSlug, cfg.Project, d.ID)
 			}
 			time.Sleep(5 * time.Second)
 			if d, e = v.Deployment(d.ID); e != nil {
-				return e
+				return "", e
 			}
 		}
 		if d.ReadyState != "READY" {
-			return errors.New("still building after 10 minutes")
+			return "", errors.New("still building after 10 minutes")
 		}
-		return nil
+		return d.ID, nil
 	}); err != nil {
 		return "", err
 	}
 	scheme := "https://"
-	if os.Getenv("GRUGBOT_TEST_HTTP") == "1" { // tests only: the fake Vercel speaks plain http
-		scheme = "http://"
-	}
 	url := scheme + d.URL
 	if p, _ := v.GetProject(cfg.ProjectID); p != nil && p.Targets.Production != nil && len(p.Targets.Production.Alias) > 0 {
 		url = scheme + p.Targets.Production.Alias[0]
@@ -551,7 +563,7 @@ func cmdDoctor(o opts) error {
 	if dsn := readEnvFile(dbEnvPath())["DATABASE_URL"]; dsn != "" {
 		check("Database reachable and CREATE TABLE works", func() error { _, e := TestDB(dsn); return e })
 	} else {
-		dim("  (no local db.env: Neon via Marketplace, database checked through the app below)")
+		dim("(no local db.env: Neon via Marketplace, database checked through the app below)")
 	}
 	v, err := login(o)
 	if err != nil {
@@ -616,13 +628,13 @@ func cmdUninstall(o opts) error {
 		cfg = Config{TeamID: "team_dryrun", ProjectID: "prj_dryrun", Project: "grugbot-console"}
 	}
 	warn("This deletes Vercel project %s (deploys, env vars, bypass secret) and %s.", cfg.Project, home())
-	dim("  Your database is not touched. Drop its tables yourself if you want them gone.")
+	dim("Your database is not touched. Drop its tables yourself if you want them gone.")
 	if !o.yes {
 		if !isTTY() {
 			return errors.New("refusing without --yes when not in a terminal")
 		}
 		var typed string
-		if err := huh.NewInput().Title("Type the project name to confirm").Value(&typed).Run(); err != nil {
+		if err := huh.NewInput().Title("Type the project name to confirm").Value(&typed).WithTheme(theme).Run(); err != nil {
 			return err
 		}
 		if typed != cfg.Project {
@@ -638,7 +650,7 @@ func cmdUninstall(o opts) error {
 		return err
 	}
 	if o.dry {
-		dim("  [dry-run] would remove %s", home())
+		dim("[dry-run] would remove %s", home())
 		return nil
 	}
 	return step("Removed "+home(), func() error { return os.RemoveAll(home()) })

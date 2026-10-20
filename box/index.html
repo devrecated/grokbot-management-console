@@ -1,0 +1,44 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Routines</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font:14px system-ui,sans-serif;margin:0;background:#f6f7f9;color:#1d2330}
+header{background:#1d2330;color:#fff;padding:14px 22px;display:flex;justify-content:space-between}
+main{padding:20px 22px;max-width:1200px;margin:auto}
+h2{font-size:16px;margin:24px 0 8px}.bot{background:#fff;border:1px solid #e3e6ea;border-radius:8px;margin-bottom:12px;padding:10px 14px}
+.bot h3{margin:4px 0 8px;font-size:15px}table{width:100%;border-collapse:collapse;background:#fff}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eef0f3;vertical-align:top}th{font-weight:600;color:#555}
+.ok{color:#137333}.error{color:#c5221f}.skipped{color:#9a6700}.muted{color:#888}
+.filters{display:flex;gap:8px;margin-bottom:8px}select,input{padding:5px;border:1px solid #ccd;border-radius:5px}
+</style></head><body>
+<header><b>Routines &amp; runs</b><span id="meta" class="muted"></span></header>
+<main><h2>Routines by bot</h2><div id="bots"></div>
+<h2>Runs</h2><div class="filters"><select id="fb"><option value="">All bots</option></select>
+<select id="fs"><option value="">All statuses</option><option>ok</option><option>error</option><option>skipped</option></select>
+<input id="fq" placeholder="Search summary"></div>
+<table><thead><tr><th>Time</th><th>Bot</th><th>Routine</th><th>Status</th><th>Summary</th></tr></thead><tbody id="runs"></tbody></table></main>
+<script>
+const INLINE=/*INLINE_DATA*/null;
+let reg=[],runs=[];
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const parse=t=>t.split("\n").filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(Boolean);
+const fmt=t=>t?new Date(t).toLocaleString():"never";
+async function load(){
+  if(INLINE){reg=INLINE.registry;runs=INLINE.runs}
+  else{const g=async f=>{try{const r=await fetch(f+"?t="+Date.now());return r.ok?parse(await r.text()):[]}catch{return[]}};
+    [reg,runs]=await Promise.all([g("registry.jsonl"),g("runs.jsonl")])}
+  runs.sort((a,b)=>new Date(b.ts)-new Date(a.ts));render();
+  document.getElementById("meta").textContent=(INLINE?"Snapshot":"Updated")+" "+new Date().toLocaleTimeString();
+}
+function render(){
+  const last={};for(const r of runs)if(!last[r.routine_id])last[r.routine_id]=r;
+  const byBot={};for(const r of reg)(byBot[r.bot]??=[]).push(r);
+  for(const r of runs)if(!reg.some(x=>x.routine_id===r.routine_id))(byBot[r.bot]??=[]).some(x=>x.routine_id===r.routine_id)||byBot[r.bot].push({routine_id:r.routine_id,name:"(unregistered)"});
+  document.getElementById("bots").innerHTML=Object.keys(byBot).sort().map(b=>`<div class="bot"><h3>${esc(b)}</h3><table><tr><th>Routine</th><th>Schedule/trigger</th><th>Purpose</th><th>Last run</th></tr>${byBot[b].map(r=>{const l=last[r.routine_id];return`<tr><td>${esc(r.name)}<div class="muted">${esc(r.routine_id)}</div></td><td>${esc(r.schedule_or_trigger)}</td><td>${esc(r.purpose)}</td><td>${l?`<span class="${esc(l.status)}">${esc(l.status)}</span> ${esc(fmt(l.ts))}`:'<span class="muted">never</span>'}</td></tr>`}).join("")}</table></div>`).join("")||'<p class="muted">No routines registered yet.</p>';
+  const fb=document.getElementById("fb"),cur=fb.value,bots=[...new Set([...reg,...runs].map(r=>r.bot))].sort();
+  fb.innerHTML='<option value="">All bots</option>'+bots.map(b=>`<option${b===cur?" selected":""}>${esc(b)}</option>`).join("");
+  const s=document.getElementById("fs").value,q=document.getElementById("fq").value.toLowerCase(),name=id=>(reg.find(r=>r.routine_id===id)||{}).name||id;
+  document.getElementById("runs").innerHTML=runs.filter(r=>(!fb.value||r.bot===fb.value)&&(!s||r.status===s)&&(!q||(r.summary||"").toLowerCase().includes(q))).slice(0,500).map(r=>`<tr><td>${esc(fmt(r.ts))}</td><td>${esc(r.bot)}</td><td>${esc(name(r.routine_id))}</td><td class="${esc(r.status)}">${esc(r.status)}</td><td>${esc(r.summary)}</td></tr>`).join("")||'<tr><td colspan="5" class="muted">No runs yet.</td></tr>';
+}
+["fb","fs","fq"].forEach(i=>document.getElementById(i).addEventListener("input",render));
+load();if(!INLINE)setInterval(load,60000);
+</script></body></html>

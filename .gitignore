@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.vercel/
+out/
+.env
+.env.*
+!box/env.example
+*.token
+.token
+*.jsonl
+*.lock
+*.bak
+*.pem
+*.key
+.DS_Store
+npm-debug.log*

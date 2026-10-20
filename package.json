@@ -1,0 +1,2 @@
+{"name":"routine-log","private":true,"scripts":{"dev":"next dev","build":"next build","start":"next start","import":"node scripts/import.mjs"},
+"dependencies":{"next":"15.5.28","react":"19.3.1","react-dom":"19.3.1","@neondatabase/serverless":"^1.0.1"}}

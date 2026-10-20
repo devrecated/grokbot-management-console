@@ -1,0 +1,46 @@
+# grugbot release build. Run by .github/workflows/release.yml on a v* tag.
+# Local check: goreleaser release --snapshot --clean
+version: 2
+project_name: grugbot
+before:
+  hooks:
+    - cli/scripts/bundle.sh
+builds:
+  - id: grugbot
+    dir: cli
+    binary: grugbot
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "grugbot_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+changelog:
+  sort: asc
+release:
+  draft: true # a human publishes it
+homebrew_casks:
+  - name: grugbot
+    repository:
+      owner: OWNER
+      name: homebrew-tap
+      token: "{{ index .Env \"HOMEBREW_TAP_TOKEN\" }}"
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}false{{ else }}true{{ end }}'
+    homepage: https://github.com/OWNER/grokbot-routines
+    description: Set up the GrugBot Console on Vercel
+    license: MIT
+    hooks:
+      post:
+        # binaries are not notarized; drop the quarantine flag so macOS lets them run
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/grugbot"]
+          end

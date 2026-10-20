@@ -1,0 +1,4 @@
+appsrc/*
+!appsrc/.gitkeep
+dist/
+grugbot

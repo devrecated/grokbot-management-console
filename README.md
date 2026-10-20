@@ -1,10 +1,56 @@
-# grokbot-routines
+# GrugBot Console
 
-The app calls itself the GrugBot Management Console. It has four tabs: Bots, Routines, Logs and Chat, plus Settings.
+A small dashboard for Grok Bot routines. It lists the routines your bots run, records every run, lets you pause, resume, reschedule or re-prompt a routine, and gives you a chat thread with Grok Bot per routine. It can also show recent logs from the machine your bots run on (the "box").
 
-A small dashboard for Grok Bot routines. It lists every routine your bots run, records each run, lets you pause, resume or reschedule a routine, and gives you a chat thread with Grok Bot per routine. It can also show recent logs from the machine your bots run on.
+**Try the demo:** https://grugbot-console-demo.vercel.app (made-up data, nothing you click is saved)
 
-It is a Next.js app on Vercel with a Neon Postgres database. A few shell and Python scripts run on the bot's machine (the "box") and talk to the app over HTTPS.
+![Tour of the demo](docs/tour.gif)
+
+It is a Next.js app on Vercel with any Postgres database. A few shell and Python scripts on the box talk to it over HTTPS.
+
+## Quickstart
+
+```bash
+brew install OWNER/tap/grugbot        # macOS and Linux
+winget install OWNER.grugbot          # Windows
+grugbot init
+```
+
+`grugbot init` asks for a Vercel token (masked, not saved), lets you pick a team, and asks whether to use your own Postgres or create a free Neon database through the Vercel Marketplace. Then it creates the project, sets `DATABASE_URL` and a generated `ROUTINE_LOG_TOKEN`, turns on Vercel Authentication, creates a bypass secret for the box, deploys, and checks the result.
+
+The box secrets go to `~/.config/grugbot/box.env` with mode 600. They are never printed. Copy that file to the box as `$INSTALL_DIR/.env` and run `box/install.sh` (see Install below).
+
+| Command | What it does |
+|---|---|
+| `grugbot init` | first-time setup, as above |
+| `grugbot doctor` | checks config, file modes, database, project, env vars, protection, last deploy and a live request |
+| `grugbot deploy` | redeploys the app bundled in the binary, for example after `brew upgrade grugbot` |
+| `grugbot uninstall` | deletes the Vercel project and local grugbot files after you type the project name. Your database is left alone. |
+
+Every command takes `--dry-run`, which prints the API calls and changes nothing. For scripts, `--yes` skips prompts and reads `--team`, `--project`, `--db own|neon` and `--database-url` (or `DATABASE_URL`) from flags.
+
+![grugbot init asking about the database](docs/cli-1-db-choice.png)
+![grugbot init finished](docs/cli-3-done.png)
+
+Vercel does not offer a device login for third-party tools, so grugbot uses an access token from https://vercel.com/account/tokens. With the Neon option, grugbot opens the Marketplace page and waits until Neon adds `DATABASE_URL` to the project.
+
+## Database
+
+Any recent Postgres should work (tested on Postgres 17 and PGlite): Neon, Supabase, RDS, Cloud SQL, or one on your own machine. The app uses plain `node-postgres` and nothing vendor-specific.
+
+The database user needs `CONNECT` on the database and `USAGE` plus `CREATE` on one schema (normally `public`). Tables are created on the first request. For a locked-down user:
+
+```sql
+create user grugbot password '...';
+grant connect on database grugbot to grugbot;
+grant usage, create on schema public to grugbot;
+```
+
+TLS: put `sslmode` in the URL (`require`, `verify-full` or `disable`). Without it, TLS with certificate checks is used for anything that is not localhost. Set `DATABASE_SSL=no-verify` for a self-signed certificate, or `DATABASE_SSL=off` to turn TLS off.
+
+## Demo mode
+
+Set `DEMO_MODE=1` and leave `DATABASE_URL` unset. The app then runs on an in-memory Postgres (PGlite) filled from `lib/demo-fixtures.js`: four fake bots, their routines, a week of runs, logs, chat threads and heartbeats. Every write from the browser is faked in the page by `public/demo-shim.js` and kept in sessionStorage. On the server, `middleware.js` answers every POST with a fake "ok", so nothing is stored. The public demo is this mode on its own Vercel project with Vercel Authentication off.
 
 ## How it fits together
 
@@ -18,7 +64,7 @@ flowchart LR
   subgraph Vercel["Vercel (Deployment Protection on)"]
     UI[Dashboard pages] --- API[API routes]
   end
-  API <--> DB[(Neon Postgres)]
+  API <--> DB[(Postgres)]
   You((You)) -->|Vercel login| UI
   API -->|chat + actions| HOOK[Grok Bot webhook trigger] --> W
 ```
@@ -50,7 +96,7 @@ Bearer routes expect `Authorization: Bearer $ROUTINE_LOG_TOKEN` plus the `x-verc
 
 Tell your Grok Bot "set up GrugBot Console". It deploys the app, asks you for the three secrets through a secure secret request (never in chat), clones this repo onto its box and runs the installer. After that, any routine that touches the dashboard runs `box/ensure-running.sh` when it wakes, so the loop comes back after a reboot.
 
-To do it by hand, deploy the app first (see Setup below), then on the box:
+To do it by hand, deploy the app first (`grugbot init`, or Setup below), then on the box:
 
 ```bash
 git clone https://github.com/OWNER/grokbot-routines.git
@@ -64,7 +110,9 @@ INSTALL_DIR=/workspace/grugbot-console grokbot-routines/box/install.sh
 
 ## Setup
 
-1. Create a Vercel project from this repo and add Neon from the Vercel Marketplace. That sets `DATABASE_URL`. Tables are created on first request.
+`grugbot init` does steps 1 to 3. By hand:
+
+1. Create a Vercel project from this repo and set `DATABASE_URL` to any Postgres (or add Neon from the Vercel Marketplace, which sets it for you). Tables are created on the first request.
 2. Turn on Deployment Protection (Vercel Authentication) and create a Protection Bypass for Automation secret for the box scripts.
 3. Set `ROUTINE_LOG_TOKEN` in the project to a long random string.
 4. Create a Grok Bot routine with a webhook trigger. Store its URL and key in the `config` table under key `grokbot_webhook` as `{"url": "...", "key": "..."}`. Env vars `GROKBOT_WEBHOOK_URL` and `GROKBOT_WEBHOOK_KEY` work as a fallback.
@@ -93,14 +141,25 @@ It also builds an activity feed per bot from the agent audit log and transcripts
 ## Security notes
 
 - Every page and route sits behind Vercel Authentication. Bot routes also require the bearer token.
-- Secrets live in Vercel env vars, the Neon `config` table and the box `.env`, never in the repo. `.gitignore` excludes `.env*`, `*.token`, `*.jsonl` and key files.
+- Secrets live in Vercel env vars, the database `config` table and the box `.env`, never in the repo. `.gitignore` excludes `.env*`, `*.token`, `*.jsonl` and key files.
 - Scripts never print tokens, and webhook errors mask the key.
 - `confirm.sh` and `reply.sh` exit nonzero on any non-2xx response or redirect, so a broken bypass secret shows up as a failure.
 - Redaction uses patterns and will miss some secrets. Review `ship-config.json` before allowing a new source.
 
 ## Cost
 
-On a Vercel plan you already have, plus Neon's free tier, this costs nothing. Log shipping adds at most one small function call per minute while the box is on, about 43,000 a month. Keep in mind that one write a minute keeps the Neon compute awake while the box runs, so watch compute hours on the free plan. A longer `sleep` in `collect-logs.sh` lets it scale to zero between batches.
+On a Vercel plan you already have, plus a free Postgres tier, this costs nothing. Log shipping adds at most one small function call per ship interval while the box is on, about 43,000 a month at the default of one minute. On a serverless database such as Neon, one write a minute keeps the compute awake while the box runs, so watch compute hours on a free plan. A longer ship interval in Settings lets it scale to zero between batches.
+
+## Releasing
+
+Releases are built by GoReleaser from `.goreleaser.yaml` when a `v*` tag is pushed (`.github/workflows/release.yml`). It builds `grugbot` for macOS, Linux and Windows on amd64 and arm64, bundles the web app into the binary (`cli/scripts/bundle.sh`), writes `checksums.txt` (SHA-256) and creates a **draft** GitHub release for a person to publish.
+
+- Homebrew: with a `HOMEBREW_TAP_TOKEN` secret, GoReleaser pushes the cask to `OWNER/homebrew-tap`. `packaging/homebrew/grugbot.rb.tmpl` is the same thing as a formula, for doing it by hand.
+- winget: fill `packaging/winget/OWNER.grugbot.yaml` from `checksums.txt` and submit it to `microsoft/winget-pkgs`.
+
+Both need public release assets, so the repository has to be public first.
+
+Local check: `goreleaser release --snapshot --clean`. CLI tests: `cd cli && GRUGBOT_TEST_DB=postgres://... go test ./...` runs `init` end to end against a fake Vercel API and a real Postgres.
 
 ## License
 

@@ -1,0 +1,29 @@
+# winget singleton-style template. Real submission uses the three-file layout below
+# (manifests/o/OWNER/grugbot/VERSION/ in microsoft/winget-pkgs). Fill VERSION and SHA256 from checksums.txt.
+PackageIdentifier: OWNER.grugbot
+PackageVersion: VERSION
+PackageLocale: en-US
+Publisher: OWNER
+PackageName: grugbot
+License: MIT
+ShortDescription: Set up the GrugBot Console on Vercel
+PackageUrl: https://github.com/OWNER/grokbot-routines
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: grugbot.exe
+        PortableCommandAlias: grugbot
+    InstallerUrl: https://github.com/OWNER/grokbot-routines/releases/download/vVERSION/grugbot_VERSION_windows_amd64.zip
+    InstallerSha256: SHA256_WINDOWS_AMD64
+  - Architecture: arm64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: grugbot.exe
+        PortableCommandAlias: grugbot
+    InstallerUrl: https://github.com/OWNER/grokbot-routines/releases/download/vVERSION/grugbot_VERSION_windows_arm64.zip
+    InstallerSha256: SHA256_WINDOWS_ARM64
+ManifestType: singleton
+ManifestVersion: 1.6.0

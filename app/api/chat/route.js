@@ -17,7 +17,10 @@ export async function POST(req){
   let bot=b.bot||null, rid=b.routine_id||null;
   if(b.thread_id){ const [f]=await q`select bot,routine_id from messages where thread_id=${tid} order by created_at limit 1`; if(f){bot??=f.bot;rid??=f.routine_id;} }
   const [m]=await q`insert into messages(thread_id,role,text,bot,routine_id) values(${tid},'user',${text},${bot},${rid}) returning id`;
-  const url=(process.env.GROKBOT_WEBHOOK_URL||"").trim(), key=(process.env.GROKBOT_WEBHOOK_KEY||"").replace(/[\r\n]/g,"").trim();
+  let url="", key="";
+  try{ await q`create table if not exists config(key text primary key, value jsonb not null, updated_at timestamptz default now())`;
+    const [c]=await q`select value from config where key='grokbot_webhook'`; url=String(c?.value?.url||"").trim(); key=String(c?.value?.key||"").replace(/[\r\n]/g,"").trim(); }catch(e){ console.error("[chat] config read failed", e?.message); }
+  if(!url.startsWith("https://")||!key){ const eu=(process.env.GROKBOT_WEBHOOK_URL||"").trim(), ek=(process.env.GROKBOT_WEBHOOK_KEY||"").replace(/[\r\n]/g,"").trim(); if(eu.startsWith("https://")&&ek){url=eu;key=ek;} else {url="";key="";} }
   let delivered=false, reason=null;
   if(!url||!key) reason="webhook not configured";
   else try{

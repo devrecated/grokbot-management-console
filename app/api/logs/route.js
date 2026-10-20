@@ -25,3 +25,18 @@ export async function POST(req){
   await q`delete from logs where id <= (select id from logs order by id desc offset ${MAX_ROWS} limit 1)`;
   return Response.json({ok:true,inserted:rows.length});
 }
+
+// Dashboard read (Vercel Authentication protects it). ?source&level&range=1h|6h|24h|7d&q&before=<id>&after=<id>
+const RANGES={"1h":1,"6h":6,"24h":24,"7d":168}, PER=100;
+export async function GET(req){
+  const p=new URL(req.url).searchParams, q=sql(); await ensureLogs(q);
+  const source=p.get("source")||"", level=p.get("level")||"", hours=RANGES[p.get("range")]||24;
+  const text=(p.get("q")||"").slice(0,200).replace(/[%_\\]/g,"\\$&"), before=parseInt(p.get("before"))||0, after=parseInt(p.get("after"))||0;
+  const rows=await q`select id,ts,source,level,message from logs where ts > now() - make_interval(hours => ${hours})
+    and (${source}='' or source=${source}) and (${level}='' or level=${level}) and (${text}='' or message ilike ${"%"+text+"%"})
+    and (${before}=0 or id<${before}) and (${after}=0 or id>${after}) order by id desc limit ${PER}`;
+  if(p.get("meta")!=="1") return Response.json({rows});
+  const sources=await q`select source, count(*)::int n from logs group by source order by source`;
+  const [cat]=await q`select value from config where key='log_catalog'`;
+  return Response.json({rows,sources,catalog:cat?.value||null});
+}

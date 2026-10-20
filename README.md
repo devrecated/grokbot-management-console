@@ -75,3 +75,7 @@ On a Vercel plan you already have, plus Neon's free tier, this costs nothing. Lo
 ## License
 
 MIT
+
+## Philosophy
+
+The code follows the [grug brain](https://grugbrain.dev) idea: complexity very bad. Plain React and CSS, no UI libraries, one file per page where possible, and nothing clever that a tired person can't read at 2 AM.

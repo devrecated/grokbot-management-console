@@ -78,4 +78,4 @@ MIT
 
 ## Philosophy
 
-The code follows the [grug brain](https://grugbrain.dev) idea: complexity very bad. Plain React and CSS, no UI libraries, one file per page where possible, and nothing clever that a tired person can't read at 2 AM.
+The code follows the [grug brain](https://grugbrain.dev) idea: complexity very bad. Plain React and CSS, no UI kits. The one exception is the Logs table, which uses TanStack Table and TanStack Virtual (headless, no styling) because sorting, expanding and rendering thousands of rows is the part worth not hand-rolling. One file per page where possible, and nothing clever that a tired person can't read at 2 AM.

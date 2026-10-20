@@ -29,3 +29,4 @@ button{background:#1d2330;color:#fff;cursor:pointer}button:disabled{opacity:.5}
 .lv .t{white-space:nowrap;color:#666}.lv .s{white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}.lv .m{white-space:pre-wrap;word-break:break-all}
 .pill{border-radius:9px;padding:1px 7px;font-size:11px;font-weight:600}.pill.error{background:#fde7e9;color:#c5221f}.pill.warn{background:#fff4ce;color:#9a6700}.pill.info{background:#e6f4ea;color:#137333}.pill.debug{background:#eef0f3;color:#666}
 .cp{padding:1px 6px;font-size:11px}
+.lv{table-layout:fixed}.lv th.sortable{cursor:pointer;user-select:none}.lv td.m{white-space:pre-wrap;word-break:break-all}.lv td.t{white-space:nowrap;color:#666}.lv td.s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

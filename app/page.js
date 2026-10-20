@@ -1,6 +1,7 @@
 import { sql, ensure, ensureMessages } from "@/lib/db";
 import Runs from "./runs";
 import Chat from "./chat";
+import RoutineRow from "./routine-row";
 export const dynamic="force-dynamic";
 const fmt=d=>d?new Date(d).toLocaleString("en-US",{timeZone:"America/New_York",dateStyle:"medium",timeStyle:"short"})+" ET":"never";
 export default async function Page(){
@@ -15,9 +16,8 @@ export default async function Page(){
   return <><header><b>Routines &amp; runs</b><span className="muted">Updated {fmt(new Date())}</span></header>
   <main><h2>Chat with Grok Bot</h2><Chat routines={routines}/>
   <h2>Routines by bot</h2>
-  {Object.keys(byBot).sort().map(b=><div className="bot" key={b}><h3>{b}</h3><table><thead><tr><th>Routine</th><th>Schedule/trigger</th><th>Purpose</th><th>Last run</th></tr></thead><tbody>
-   {byBot[b].map(r=>{const l=last[r.routine_id];return <tr key={r.routine_id}><td>{r.name}<div className="muted">{r.routine_id}</div></td><td>{r.schedule_or_trigger}</td><td>{r.purpose}</td>
-   <td>{l?<><span className={l.status}>{l.status}</span> {l.when}</>:<span className="muted">never</span>}</td></tr>})}</tbody></table></div>)}
+  {Object.keys(byBot).sort().map(b=><div className="bot" key={b}><h3>{b}</h3><table><thead><tr><th>Routine</th><th>Schedule/trigger</th><th>Purpose</th><th>Last run</th><th>Controls</th></tr></thead><tbody>
+   {byBot[b].map(r=>r.bot_id===undefined&&r.name==="(unregistered)"?<tr key={r.routine_id}><td>{r.name}<div className="muted">{r.routine_id}</div></td><td colSpan={4}/></tr>:<RoutineRow key={r.routine_id} r={{routine_id:r.routine_id,name:r.name,bot:r.bot,schedule_or_trigger:r.schedule_or_trigger,purpose:r.purpose,status:r.status,pending_action:r.pending_action}} last={last[r.routine_id]?{status:last[r.routine_id].status,when:last[r.routine_id].when}:null}/>)}</tbody></table></div>)}
   {!reg.length&&<p className="muted">No routines registered yet.</p>}
   <h2>Runs</h2><Runs runs={runs} names={names}/></main></>;
 }

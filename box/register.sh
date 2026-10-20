@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Usage: register.sh "bot" "bot_id" "routine_id" "name" "schedule_or_trigger" "purpose"
+# Usage: register.sh "bot" "bot_id" "routine_id" "name" "schedule_or_trigger" "purpose" ["active|paused"]
 set -euo pipefail
 DIR="${ROUTINE_LOG_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-[ "$#" -eq 6 ] || { echo "usage: $0 bot bot_id routine_id name schedule_or_trigger purpose" >&2; exit 2; }
+[ "$#" -eq 6 ] || [ "$#" -eq 7 ] || { echo "usage: $0 bot bot_id routine_id name schedule_or_trigger purpose [active|paused]" >&2; exit 2; }
+case "${7:-active}" in active|paused) ;; *) echo "status must be active|paused" >&2; exit 2;; esac
 python3 - "$DIR/registry.jsonl" "$@" <<'PY'
 import sys, json, os, fcntl, datetime, tempfile
 path, bot, bid, rid, name, sched, purpose = sys.argv[1:8]
+status = sys.argv[8] if len(sys.argv) > 8 else None
 rec = {"bot": bot, "bot_id": bid, "routine_id": rid, "name": name,
        "schedule_or_trigger": sched, "purpose": purpose[:300],
        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
+if status: rec["status"] = status
 open(path, "a").close()
 with open(path + ".lock", "w") as lk:
     fcntl.flock(lk, fcntl.LOCK_EX)

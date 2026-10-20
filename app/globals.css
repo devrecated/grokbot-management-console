@@ -12,3 +12,5 @@ button{background:#1d2330;color:#fff;cursor:pointer}button:disabled{opacity:.5}
 .pane{background:#fff;border:1px solid #e3e6ea;border-radius:8px;padding:10px 14px;display:flex;flex-direction:column}
 .msgs{flex:1;max-height:340px;overflow:auto;margin-bottom:8px}.msg{margin:6px 0;padding:6px 10px;border-radius:8px;max-width:80%;white-space:pre-wrap}
 .user{background:#1d2330;color:#fff;margin-left:auto}.grokbot{background:#eef0f3}.compose{display:flex;gap:8px}.compose textarea{flex:1;min-height:38px}
+.ghost{background:#fff;color:#1d2330}.link{background:none;border:none;color:#c5221f;text-decoration:underline;padding:0}
+.pending{background:#fff4ce;color:#9a6700;border-radius:10px;padding:2px 8px;font-size:12px;white-space:normal}.editor{background:#fafbfc}

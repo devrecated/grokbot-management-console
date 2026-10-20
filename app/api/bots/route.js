@@ -1,6 +1,6 @@
 // Bot profiles + content-free activity events from the box (bearer ROUTINE_LOG_TOKEN + bypass). Body {bots?, events}, gzip allowed.
 // Events carry only ts, bot key, kind, tool/event name and optional target bot name. 7-day retention, 50k row cap.
-import { sql, authed, ensureBots } from "@/lib/db";
+import { sql, authed, ensureBots, heartbeat } from "@/lib/db";
 import { gunzipSync } from "zlib";
 export const dynamic="force-dynamic";
 const KEEP_DAYS=7, MAX_ROWS=50000;
@@ -9,7 +9,7 @@ export async function POST(req){
   if(!authed(req)) return Response.json({error:"unauthorized"},{status:401});
   let b; try{ const buf=Buffer.from(await req.arrayBuffer()); b=JSON.parse((buf[0]===0x1f?gunzipSync(buf,{maxOutputLength:20e6}):buf).toString("utf8")); }
   catch{ return Response.json({error:"bad body"},{status:400}); }
-  const q=sql(); await ensureBots(q);
+  const q=sql(); await ensureBots(q); await heartbeat(q,b.instance);
   if(Array.isArray(b.bots)){ const L=b.bots.slice(0,500);
     await q`insert into bots(key,name,title,description,color,updated_at) select *, now() from unnest(${L.map(x=>s(x.key,40))}::text[],${L.map(x=>s(x.name,80))}::text[],${L.map(x=>s(x.title,120))}::text[],${L.map(x=>s(x.description,400))}::text[],${L.map(x=>s(x.color,20))}::text[])
       on conflict(key) do update set name=excluded.name,title=excluded.title,description=excluded.description,color=excluded.color,updated_at=now()`;

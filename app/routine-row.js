@@ -1,11 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
 import { DAYS, build, isEvent } from "./schedule";
+import PromptEditor from "./prompt-editor";
 export default function RoutineRow({r, last}){
   const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[note,setNote]=useState("");
   const [pending,setPending]=useState(r.pending_action);
   const [s,setS]=useState({freq:"weekdays",time:"08:00",days:[1],dom:1,n:15,minute:0,cron:"",date:"",timing:"exact"});
-  const [trig,setTrig]=useState("");
+  const [trig,setTrig]=useState(""),[edit,setEdit]=useState(false),[asked,setAsked]=useState(false);
   useEffect(()=>{setPending(r.pending_action);},[JSON.stringify(r.pending_action)]);
   const event=isEvent(r.schedule_or_trigger);
   const b=build(s);
@@ -16,6 +17,8 @@ export default function RoutineRow({r, last}){
     const j=await res.json().catch(()=>({})); setBusy(false);
     if(!res.ok){ setNote("Error: "+(j.error||res.status)); return; }
     if(j.cancelled){ setPending(null); setNote("Cancelled"); return; }
+    if(j.fetching){ setAsked(true); setNote(j.delivered?"Asked the bot for its prompt…":"Saved, not delivered"+(j.reason?` (${j.reason})`:"")); return; }
+    if(body.action==="set_prompt") setEdit(false);
     setPending(j.pending); setOpen(false); setNote(j.delivered?"Sent to Grok Bot":"Saved, not delivered"+(j.reason?` (${j.reason})`:""));
   }
   const set=(k,v)=>setS(x=>({...x,[k]:v}));
@@ -30,9 +33,11 @@ export default function RoutineRow({r, last}){
     <td style={{whiteSpace:"nowrap"}}>
       {pending?<div><span className="pending">Pending: {pending.human||pending.action}</span> <button className="link" disabled={busy} onClick={()=>act({action:"cancel"})}>cancel</button></div>:<>
       <button disabled={busy} onClick={()=>act({action:paused?"resume":"pause",human:paused?"Resume routine":"Pause routine"})}>{paused?"Resume":"Pause"}</button>{" "}
-      <button disabled={busy} className="ghost" onClick={()=>setOpen(o=>!o)}>{event?"Trigger…":"Edit schedule"}</button></>}
+      <button disabled={busy} className="ghost" onClick={()=>setOpen(o=>!o)}>{event?"Trigger…":"Edit schedule"}</button>{" "}<button disabled={busy} className="ghost" onClick={()=>{ if(!r.prompt_text&&!asked) act({action:"fetch_prompt"}); setEdit(e=>!e); }}>Edit prompt</button>{" "}<a href={`/chat?thread=${encodeURIComponent("routine:"+r.routine_id)}`} style={{fontSize:12}}>Open chat</a></>}
       {note&&<div className="muted" style={{fontSize:12}}>{note}</div>}
     </td></tr>
+    {edit&&!pending&&<tr><td colSpan={5} className="editor"><PromptEditor r={r} fetching={(asked||(r.prompt_requested_at&&Date.now()-new Date(r.prompt_requested_at)<600000))&&!r.prompt_text}
+      busy={busy} onSave={p=>act({action:"set_prompt",prompt:p})} onRefetch={()=>act({action:"fetch_prompt"})} onClose={()=>setEdit(false)}/></td></tr>}
     {open&&!pending&&<tr><td colSpan={5} className="editor">
       {event?<div>
         <div><b>Trigger:</b> <span className="muted">{r.schedule_or_trigger} (event-triggered; read-only)</span></div>

@@ -7,8 +7,8 @@ import { useReactTable, getCoreRowModel, getSortedRowModel, getFilteredRowModel,
 import { useVirtualizer } from "@tanstack/react-virtual";
 import Info from "./info";
 const RANGES=["15m","1h","6h","24h","7d"], LEVELS=["error","warn","info","debug"];
-const EMPTY={source:[],level:[],xsource:[],xlevel:[],q:"",re:"",range:"24h",from:"",to:"",around:""};
-const LISTS=["source","level","xsource","xlevel"];
+const EMPTY={instance:[],source:[],level:[],xsource:[],xlevel:[],q:"",re:"",range:"24h",from:"",to:"",around:""};
+const LISTS=["instance","source","level","xsource","xlevel"];
 const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"});
 const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
 function fromUrl(){ const p=new URLSearchParams(location.search), f={...EMPTY};
@@ -32,9 +32,10 @@ export default function Viewer({grug}){
   const [rows,setRows]=useState([]),[meta,setMeta]=useState({facets:[],catalog:null,per:200}),[err,setErr]=useState("");
   const [live,setLive]=useState(false),[busy,setBusy]=useState(false),[more,setMore]=useState(false),[copied,setCopied]=useState(null);
   const [sorting,setSorting]=useState([]),[quick,setQuick]=useState(""),[expanded,setExpanded]=useState({});
-  const [pinned,setPinned]=useState({}),[colVis,setColVis]=useState({}),[colSize,setColSize]=useState({});
+  const [ship,setShip]=useState(60),[pinned,setPinned]=useState({}),[colVis,setColVis]=useState({}),[colSize,setColSize]=useState({});
   useEffect(()=>{ const u=fromUrl(); setF(u); setDraft({q:u.q,re:u.re,mode:u.re?"regex":"contains"});
-    try{ setPinned(JSON.parse(localStorage.getItem("logPins")||"{}")); }catch{} },[]);
+    try{ setPinned(JSON.parse(localStorage.getItem("logPins")||"{}")); }catch{}
+    fetch("/api/settings").then(r=>r.json()).then(j=>setShip(j.ship_interval_s||60)).catch(()=>{}); },[]);
   useEffect(()=>{ localStorage.setItem("logPins",JSON.stringify(pinned)); },[pinned]);
   const set=o=>setF(x=>({...x,...o}));
   async function get(extra){ const r=await fetch("/api/logs?"+toQuery(f,extra),{cache:"no-store"}); const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j; }
@@ -55,6 +56,7 @@ export default function Viewer({grug}){
     {id:"t",header:"Time (ET)",accessorKey:"ts",size:160,cell:c=>fmt(c.getValue())},
     {id:"level",header:"Level",accessorKey:"level",size:76,cell:c=><span className={`pill ${c.getValue()}`} onClick={e=>pick("level",c.getValue(),e)} title="click: filter · shift-click: exclude">{c.getValue()}</span>},
     {id:"s",header:"Source",accessorKey:"source",size:210,cell:c=><span className="val" onClick={e=>pick("source",c.getValue(),e)} title="click: filter · shift-click: exclude">{c.getValue()}</span>},
+    {id:"inst",header:"Instance",accessorFn:r=>r.instance_id||"",size:80,cell:c=>c.getValue()?<span className="val" title={c.getValue()} onClick={e=>{e.stopPropagation();set({instance:f.instance.includes(c.getValue())?f.instance.filter(x=>x!==c.getValue()):[...f.instance,c.getValue()]});}}>{c.getValue().slice(0,6)}</span>:<span className="muted">–</span>},
     {id:"m",header:"Message",accessorKey:"message",size:700,enableSorting:false,cell:({row,getValue})=>row.getIsExpanded()
       ?<><Mark text={getValue()} terms={terms}/><div className="row-acts"><span className="muted">id {row.original.id} · {row.original.ts}</span>
         <button className="ghost cp" onClick={e=>{e.stopPropagation();setF({...EMPTY,range:"",around:String(row.original.id)});}}>Show ±1 min around</button></div></>
@@ -76,12 +78,13 @@ export default function Viewer({grug}){
   const Row=(r,i,pinnedRow)=><tr key={pinnedRow?i:r.id} data-index={i} ref={pinnedRow?undefined:virt.measureElement} className={(r.getIsExpanded()?"open ":"")+(pinnedRow?"pinrow":"")} onClick={r.getToggleExpandedHandler()}>
     {r.getVisibleCells().map(c=><td key={c.id} className={c.column.id} style={{width:c.column.getSize(),...sticky(c)}}>{flexRender(c.column.columnDef.cell,c.getContext())}</td>)}</tr>;
   const ncol=table.getVisibleLeafColumns().length;
-  const chips=[...f.source.map(v=>["source",v,"+"]),...f.level.map(v=>["level",v,"+"]),...f.xsource.map(v=>["xsource",v,"−"]),...f.xlevel.map(v=>["xlevel",v,"−"])];
+  const chips=[...f.instance.map(v=>["instance",v,"+"]),...f.source.map(v=>["source",v,"+"]),...f.level.map(v=>["level",v,"+"]),...f.xsource.map(v=>["xsource",v,"−"]),...f.xlevel.map(v=>["xlevel",v,"−"])];
   return <>
     <div className="grug-head">{grug}<div><h2 style={{margin:0,display:"flex",gap:8,alignItems:"center"}}>Box logs <Info catalog={meta.catalog}/></h2>
       <div className="muted" style={{fontSize:12}}>one table. complexity very bad. click a source or level to filter, shift-click to exclude.</div></div></div>
     <div className="lv-bar">
       <Multi label="Source" values={counts("source")} inc={f.source} exc={f.xsource} onChange={(a,b)=>set({source:a,xsource:b})}/>
+      <Multi label="Instance" values={counts("instance_id").filter(([v])=>v).map(([v,n])=>[v,n])} inc={f.instance} exc={[]} onChange={a=>set({instance:a})}/>
       <Multi label="Level" values={counts("level").sort((a,b)=>LEVELS.indexOf(a[0])-LEVELS.indexOf(b[0]))} inc={f.level} exc={f.xlevel} onChange={(a,b)=>set({level:a,xlevel:b})}/>
       <form onSubmit={e=>{e.preventDefault(); set(draft.mode==="regex"?{re:draft.re||draft.q,q:""}:{q:draft.q||draft.re,re:""});}} style={{display:"flex",gap:4}}>
         <select value={draft.mode} onChange={e=>setDraft(d=>({...d,mode:e.target.value}))}><option value="contains">contains</option><option value="regex">regex</option></select>
@@ -95,7 +98,9 @@ export default function Viewer({grug}){
       <details className="ms"><summary>Columns</summary><div className="ms-pop">{table.getAllLeafColumns().filter(c=>c.getCanHide()&&c.columnDef.header).map(c=>
         <label key={c.id} className="ms-row"><span><input type="checkbox" checked={c.getIsVisible()} onChange={c.getToggleVisibilityHandler()}/>{c.columnDef.header}</span></label>)}
         <button className="ghost cp" onClick={()=>setColSize({})}>reset widths</button></div></details>
-      <label className="lv-live"><input type="checkbox" checked={live} onChange={e=>setLive(e.target.checked)}/>Live{live&&<span className="dot"/>}</label>
+      <button className="ghost" onClick={load} disabled={busy}>Refresh</button>
+      <label className="lv-live"><input type="checkbox" checked={live} onChange={e=>setLive(e.target.checked)}/>Stream{live&&<span className="dot"/>}</label>
+      <span className="info" tabIndex={0} aria-label="About stream">i<span className="tip" role="tooltip">New lines arrive from the box every {ship<60?`${ship}s`:`${ship/60} min`} (ship interval, set in Settings); stream checks the dashboard every 5s.</span></span>
       <button className="ghost cp" onClick={()=>navigator.clipboard?.writeText(location.href)}>copy link</button>
       <span className="muted">{busy?"loading…":`${center.length} of ${rows.length} loaded${top.length?` · ${top.length} pinned`:""}`}</span>
     </div>

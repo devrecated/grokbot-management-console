@@ -3,6 +3,8 @@
 Per event we keep only: timestamp, bot, event type or tool name, and the target bot name when one bot hands work to another.
 Never commands, arguments, messages, results or any other content. Bot ids are hashed. Fail-soft, incremental, skips when unchanged."""
 import os, sys, json, glob, gzip, hashlib, sqlite3, time, urllib.request
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from instance import info
 DIR=os.path.dirname(os.path.abspath(__file__)); DB=os.path.join(DIR,"logs","box-logs.db")
 ROOT=os.environ.get("AGENT_DATA","/home/box/agent-data")
 h=lambda s: hashlib.sha256(("bot:"+s).encode()).hexdigest()[:12]
@@ -64,7 +66,7 @@ def main():
     rows=db.execute("select id,ts,bot,kind,tool,target from bot_events where id>? order by id limit 5000",(cur,)).fetchall()
     if not rows and not send_bots: return
     env=dict(l.rstrip("\n").split("=",1) for l in open(os.path.join(DIR,".env")) if "=" in l)
-    body={"events":[{"ts":r[1],"bot":r[2],"kind":r[3],"tool":r[4],"target":r[5]} for r in rows]}
+    body={"instance":info(),"events":[{"ts":r[1],"bot":r[2],"kind":r[3],"tool":r[4],"target":r[5]} for r in rows]}
     if send_bots: body["bots"]=json.loads(bjson)
     req=urllib.request.Request(env["ROUTINE_LOG_URL"].rstrip("/")+"/api/bots",data=gzip.compress(json.dumps(body).encode()),
         headers={"content-type":"application/json","content-encoding":"gzip","authorization":"Bearer "+env["ROUTINE_LOG_TOKEN"],"x-vercel-protection-bypass":env.get("VERCEL_BYPASS","")})

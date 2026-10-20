@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Usage: confirm.sh <routine_id> ok|fail '<json fields e.g. {"status":"paused","schedule_or_trigger":"0 8 * * 1-5"}>' '<note>'
+# Usage: confirm.sh <routine_id> ok|fail '<json fields e.g. {"status":"paused","schedule_or_trigger":"0 8 * * 1-5","prompt":"..."}>' '<note>'
+# For a long prompt use: confirm.sh <id> ok "$(python3 -c 'import json,sys;print(json.dumps({"prompt":open(sys.argv[1]).read()}))' file.txt)" 'note'
 # Confirms (applies) or rejects a pending dashboard change; posts a Grok Bot message on the routine thread.
 set -euo pipefail
 DIR="${ROUTINE_LOG_DIR:-$(cd "$(dirname "$0")" && pwd)}"
@@ -16,7 +17,7 @@ for l in open(p):
 try: f = json.loads(fields or "{}")
 except Exception: print("fields must be JSON", file=sys.stderr); sys.exit(2)
 body = {"routine_id": rid, "ok": ok == "ok", "note": note}
-for k in ("status", "schedule_or_trigger"):
+for k in ("status", "schedule_or_trigger", "prompt"):
     if k in f: body[k] = f[k]
 req = urllib.request.Request(env["ROUTINE_LOG_URL"].rstrip("/") + "/api/routines/confirm", data=json.dumps(body).encode(),
     headers={"content-type": "application/json", "authorization": "Bearer " + env["ROUTINE_LOG_TOKEN"], "x-vercel-protection-bypass": env.get("VERCEL_BYPASS", "")})

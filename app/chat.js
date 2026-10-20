@@ -22,10 +22,11 @@ export default function Chat({routines,alwaysChat}){
     else setNote("Error: "+(j.error||r.status));
   }
   const cur=threads.find(t=>t.thread_id===tid);
-  return <div className="chat">
-    <div className="threads"><div className={!tid?"sel":""} onClick={()=>{setTid(null);setMsgs([]);}}><b>+ New thread</b></div>
-      {threads.map(t=><div key={t.thread_id} className={t.thread_id===tid?"sel":""} onClick={()=>setTid(t.thread_id)}>
-        <div>{t.first_text.slice(0,40)}</div><div className="muted">{t.bot||"Any bot"} · {fmt(t.last_at)}</div></div>)}</div>
+  return <div className="chat chat-full">
+    <div className="threads"><div className={!tid?"sel":""} onClick={()=>{setTid(null);setMsgs([]);history.replaceState(null,"","/chat");}}><b>+ New thread</b></div>
+      {Object.entries(threads.reduce((m,t)=>((m[t.bot||"Any bot"]??=[]).push(t),m),{})).map(([b,ts])=><div key={b} className="tgroup"><div className="tg-h">{b}</div>
+        {ts.map(t=><div key={t.thread_id} className={t.thread_id===tid?"sel":""} onClick={()=>{setTid(t.thread_id);history.replaceState(null,"","/chat?thread="+encodeURIComponent(t.thread_id));}}>
+          <div>{t.thread_id.startsWith("routine:")?<b>{t.routine_id||t.thread_id.slice(8)}</b>:t.first_text.slice(0,40)}</div><div className="muted">{fmt(t.last_at)}</div></div>)}</div>)}</div>
     <div className="pane">
       <div className="msgs">{!tid&&<p className="muted">Start a new thread. Pick a bot and routine to point Grok Bot at it.</p>}
         {msgs.map(m=><div key={m.id} className={`msg ${m.role}`}>{m.text}<div className="muted" style={{fontSize:11}}>{m.role==="user"?"You":"Grok Bot"} · {fmt(m.created_at)}{m.role==="user"&&m.delivered===false?" · not delivered":""}</div></div>)}<div ref={end}/></div>

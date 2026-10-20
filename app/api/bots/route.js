@@ -4,7 +4,7 @@ import { sql, authed, ensureBots, heartbeat } from "@/lib/db";
 import { gunzipSync } from "zlib";
 export const dynamic="force-dynamic";
 const KEEP_DAYS=7, MAX_ROWS=50000;
-const s=(v,n)=>v==null?null:String(v).slice(0,n);
+const s=(v,n)=>v==null?null:String(v).replace(/\u0000/g,"").slice(0,n);
 export async function POST(req){
   if(!authed(req)) return Response.json({error:"unauthorized"},{status:401});
   let b; try{ const buf=Buffer.from(await req.arrayBuffer()); b=JSON.parse((buf[0]===0x1f?gunzipSync(buf,{maxOutputLength:20e6}):buf).toString("utf8")); }

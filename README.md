@@ -1,5 +1,7 @@
 # grokbot-routines
 
+The app calls itself the GrugBot Management Console. It has three tabs: Bots, Routines and Logs, plus Settings.
+
 A small dashboard for Grok Bot routines. It lists every routine your bots run, records each run, lets you pause, resume or reschedule a routine, and gives you a chat thread with Grok Bot per routine. It can also show recent logs from the machine your bots run on.
 
 It is a Next.js app on Vercel with a Neon Postgres database. A few shell and Python scripts run on the bot's machine (the "box") and talk to the app over HTTPS.
@@ -59,6 +61,12 @@ Bearer routes expect `Authorization: Bearer $ROUTINE_LOG_TOKEN` plus the `x-verc
 `start-log-loop.sh` runs both every 60 seconds at the lowest CPU and IO priority. It is a plain sleep loop with no cron dependency and nothing that would keep the machine awake. Run `logs.sh sources` or `logs.sh -s exec-daemon -l error -t 2h -g timeout` to read the local copy.
 
 The server keeps 7 days and at most 200,000 log rows, pruned on each ingest.
+
+## Bots tab
+
+`bot_sync.py` runs in the same 60-second loop. It reads each bot's `profile.json` (name, title, description, colour) and sends them when they change. Bot ids are hashed before they leave the box.
+
+It also builds an activity feed per bot from the agent audit log and transcripts. Each event keeps four things: the time, the bot, the event or tool name (for example `shell` or `web_search`), and the target bot's name when one bot hands work to another. Commands, arguments, messages and results are never read into the feed. Transcripts have no timestamps, so an event gets the time the loop first saw it; a first sync uses the file's modified time. The server keeps 7 days and 50,000 events.
 
 ## Security notes
 

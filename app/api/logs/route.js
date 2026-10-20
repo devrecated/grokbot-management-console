@@ -26,17 +26,29 @@ export async function POST(req){
   return Response.json({ok:true,inserted:rows.length});
 }
 
-// Dashboard read (Vercel Authentication protects it). ?source&level&range=1h|6h|24h|7d&q&before=<id>&after=<id>
-const RANGES={"1h":1,"6h":6,"24h":24,"7d":168}, PER=100;
+// Dashboard read (Vercel Authentication protects it). All filters are server-side:
+// source,level = comma lists to include; xsource,xlevel = comma lists to exclude; q = contains; re = regex (Postgres ~*);
+// range=1h|6h|24h|7d or from/to ISO; around=<id> (+-1 min of that row); before/after=<id> for paging and live.
+const RANGES={"1h":1,"6h":6,"24h":24,"7d":168}, PER=200;
+const list=v=>(v||"").split(",").map(x=>x.trim()).filter(Boolean).slice(0,50);
 export async function GET(req){
   const p=new URL(req.url).searchParams, q=sql(); await ensureLogs(q);
-  const source=p.get("source")||"", level=p.get("level")||"", hours=RANGES[p.get("range")]||24;
-  const text=(p.get("q")||"").slice(0,200).replace(/[%_\\]/g,"\\$&"), before=parseInt(p.get("before"))||0, after=parseInt(p.get("after"))||0;
-  const rows=await q`select id,ts,source,level,message from logs where ts > now() - make_interval(hours => ${hours})
-    and (${source}='' or source=${source}) and (${level}='' or level=${level}) and (${text}='' or message ilike ${"%"+text+"%"})
-    and (${before}=0 or id<${before}) and (${after}=0 or id>${after}) order by id desc limit ${PER}`;
-  if(p.get("meta")!=="1") return Response.json({rows});
-  const sources=await q`select source, count(*)::int n from logs group by source order by source`;
+  const src=list(p.get("source")), lvl=list(p.get("level")), xsrc=list(p.get("xsource")), xlvl=list(p.get("xlevel"));
+  const text=(p.get("q")||"").slice(0,200).replace(/[%_\\]/g,"\\$&"), re=(p.get("re")||"").slice(0,200);
+  const before=parseInt(p.get("before"))||0, after=parseInt(p.get("after"))||0, around=parseInt(p.get("around"))||0;
+  let from=new Date(Date.now()-(RANGES[p.get("range")]||24)*3600e3), to=new Date(Date.now()+60e3);
+  if(p.get("from")&&!isNaN(new Date(p.get("from")))) from=new Date(p.get("from"));
+  if(p.get("to")&&!isNaN(new Date(p.get("to")))) to=new Date(p.get("to"));
+  if(around){ const [a]=await q`select ts from logs where id=${around}`; if(a){ from=new Date(new Date(a.ts)-60e3); to=new Date(+new Date(a.ts)+60e3); } }
+  let rows;
+  try{ rows=await q`select id,ts,source,level,message from logs where ts >= ${from.toISOString()} and ts <= ${to.toISOString()}
+    and (cardinality(${src}::text[])=0 or source = any(${src}::text[])) and (cardinality(${lvl}::text[])=0 or level = any(${lvl}::text[]))
+    and not (source = any(${xsrc}::text[])) and not (level = any(${xlvl}::text[]))
+    and (${text}='' or message ilike ${"%"+text+"%"}) and (${re}='' or message ~* ${re})
+    and (${before}=0 or id<${before}) and (${after}=0 or id>${after}) order by id desc limit ${around?2000:PER}`; }
+  catch(e){ return Response.json({error:"bad filter (check the regex)"},{status:400}); }
+  if(p.get("meta")!=="1") return Response.json({rows,per:PER});
+  const facets=await q`select source, level, count(*)::int n from logs where ts >= ${from.toISOString()} and ts <= ${to.toISOString()} group by source, level`;
   const [cat]=await q`select value from config where key='log_catalog'`;
-  return Response.json({rows,sources,catalog:cat?.value||null});
+  return Response.json({rows,per:PER,facets,catalog:cat?.value||null});
 }

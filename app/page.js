@@ -16,7 +16,7 @@ export default async function Page(){
   for(const r of runs) if(!reg.some(x=>x.routine_id===r.routine_id)&&!(byBot[r.bot]??=[]).some(x=>x.routine_id===r.routine_id)) byBot[r.bot].push({routine_id:r.routine_id,name:"(unregistered)"});
   const names=Object.fromEntries(reg.map(r=>[r.routine_id,r.name]));
   const routines=reg.map(r=>({bot:r.bot,routine_id:r.routine_id,name:r.name}));
-  return <><Refresher pending={reg.some(r=>r.pending_action)}/><Nav right={<span className="muted">Updated {fmt(new Date())}</span>}/>
+  return <><Refresher pending={reg.some(r=>r.pending_action)}/><Nav active="routines" right={<span className="muted">Updated {fmt(new Date())}</span>}/>
   <main><h2>Chat with Grok Bot</h2><Chat routines={routines} alwaysChat={(await getSettings(q)).always_reply_in_chat}/>
   <h2>Routines by bot</h2>
   {Object.keys(byBot).sort().map(b=><div className="bot" key={b}><h3>{b}</h3><table><thead><tr><th>Routine</th><th>Schedule/trigger</th><th>Purpose</th><th>Last run</th><th>Controls</th></tr></thead><tbody>

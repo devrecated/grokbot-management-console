@@ -7,7 +7,7 @@ MAX_DAYS=30; MAX_MB=50; MAX_LINE=2000; MAX_NEW_PER_FILE=20000
 SOURCES=["/var/log/**/*","/tmp/**/*.log","/tmp/**/*.out","/tmp/**/*.err",os.path.expanduser("~/.cache/**/*.log"),
          os.path.expanduser("~/.npm/_logs/*.log"),os.path.join(DIR,"runs.jsonl"),os.path.join(DIR,"registry.jsonl")]
 # Browser profile LevelDB ".log" files are binary site-storage databases (session/local storage), not logs.
-SKIP_DIRS=re.compile(r"(/node_modules/|/chrome-profile/|google-chrome|mcp-chrome|/Default/|leveldb|/\.git/|/var/log/journal/|/routine-log/logs/|/sand-data/plugins/)")
+SKIP_DIRS=re.compile(r"(/agent-data/|/node_modules/|/chrome-profile/|google-chrome|mcp-chrome|/Default/|leveldb|/\.git/|/var/log/journal/|/routine-log/logs/|/sand-data/plugins/)")
 BINARY={"wtmp","btmp","lastlog","faillog"}
 def proc_outputs():
     """Regular files that running processes (same user) write stdout/stderr to."""

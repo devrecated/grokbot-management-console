@@ -24,8 +24,11 @@ export async function POST(req){
     const origin=new URL(req.url).origin;
     const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${key}`},
       body:JSON.stringify({message_id:String(m.id),thread_id:tid,text,bot,routine_id:rid,dashboard_url:`${origin}/?thread=${tid}`}),signal:AbortSignal.timeout(10000)});
-    delivered=r.ok; if(!r.ok) reason=`webhook ${r.status}`;
-  }catch(e){ reason="webhook unreachable"; }
+    delivered=r.ok; if(!r.ok){ reason=`webhook ${r.status}`; console.error("[chat] webhook non-2xx", r.status, (await r.text().catch(()=>"")).slice(0,200)); }
+  }catch(e){
+    const c=e?.cause; reason=`webhook unreachable: ${e?.name||"Error"}${c?.code?` ${c.code}`:""}${(c?.message||e?.message)?` - ${String(c?.message||e?.message).replaceAll(key,"[key]").slice(0,160)}`:""}`;
+    console.error("[chat] webhook fetch failed", reason, {host:(()=>{try{return new URL(url).host}catch{return "invalid-url"}})()});
+  }
   await q`update messages set delivered=${delivered} where id=${m.id}`;
   return Response.json({ok:true,message_id:String(m.id),thread_id:tid,delivered,reason});
 }

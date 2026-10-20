@@ -3,9 +3,9 @@ import { useEffect, useState, useRef } from "react";
 const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})+" ET";
 export default function Chat({routines}){
   const [threads,setThreads]=useState([]),[tid,setTid]=useState(null),[msgs,setMsgs]=useState([]);
-  const [text,setText]=useState(""),[bot,setBot]=useState(""),[rid,setRid]=useState(""),[busy,setBusy]=useState(false),[note,setNote]=useState("");
+  const [text,setText]=useState(""),[bot,setBot]=useState(""),[rid,setRid]=useState(""),[busy,setBusy]=useState(false),[note,setNote]=useState(""),[also,setAlso]=useState(false);
   const end=useRef(null);
-  useEffect(()=>{const t=new URLSearchParams(location.search).get("thread"); if(t) setTid(t);},[]);
+  useEffect(()=>{const t=new URLSearchParams(location.search).get("thread"); if(t) setTid(t); setAlso(localStorage.getItem("alsoChat")==="1");},[]);
   const bots=[...new Set(routines.map(r=>r.bot))].sort();
   async function load(){
     const r=await fetch(`/api/chat${tid?`?thread_id=${encodeURIComponent(tid)}`:""}`,{cache:"no-store"}); if(!r.ok) return;
@@ -15,7 +15,7 @@ export default function Chat({routines}){
   useEffect(()=>{end.current?.scrollIntoView({block:"nearest"});},[msgs.length]);
   async function send(){
     if(!text.trim()) return; setBusy(true); setNote("");
-    const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({thread_id:tid,text,bot:bot||null,routine_id:rid||null})});
+    const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({thread_id:tid,text,bot:bot||null,routine_id:rid||null,also_chat:also})});
     const j=await r.json().catch(()=>({})); setBusy(false);
     if(r.ok){ setText(""); if(!tid) setTid(j.thread_id); setNote(j.delivered?"Delivered to Grok Bot":"Saved, not delivered"+(j.reason?` (${j.reason})`:"")); load(); }
     else setNote("Error: "+(j.error||r.status));
@@ -32,6 +32,7 @@ export default function Chat({routines}){
         <select value={rid} onChange={e=>setRid(e.target.value)}><option value="">Any routine</option>{routines.filter(r=>!bot||r.bot===bot).map(r=><option key={r.routine_id} value={r.routine_id}>{r.name}</option>)}</select></div>}
       {cur&&<div className="muted" style={{marginBottom:6}}>{cur.bot||"Any bot"}{cur.routine_id?` · ${cur.routine_id}`:""}</div>}
       <div className="compose"><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Message Grok Bot" onKeyDown={e=>{if(e.key==="Enter"&&(e.metaKey||e.ctrlKey))send();}}/>
+        <label style={{display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><input type="checkbox" checked={also} onChange={e=>{setAlso(e.target.checked);localStorage.setItem("alsoChat",e.target.checked?"1":"0");}}/>Also reply in Grok Bot chat</label>
         <button disabled={busy||!text.trim()} onClick={send}>Send</button></div>
       {note&&<div className="muted" style={{marginTop:6}}>{note}</div>}
     </div></div>;

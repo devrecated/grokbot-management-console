@@ -10,13 +10,13 @@ export async function GET(req){
   return Response.json({threads,messages});
 }
 export async function POST(req){
-  const b=await req.json(); const text=String(b.text||"").trim().slice(0,8000);
+  const b=await req.json(); const text=String(b.text||"").trim().slice(0,8000); const also=b.also_chat===true;
   if(!text) return Response.json({error:"text required"},{status:400});
   const q=sql(); await ensureMessages(q);
   const tid=b.thread_id||randomUUID();
   let bot=b.bot||null, rid=b.routine_id||null;
   if(b.thread_id){ const [f]=await q`select bot,routine_id from messages where thread_id=${tid} order by created_at limit 1`; if(f){bot??=f.bot;rid??=f.routine_id;} }
-  const [m]=await q`insert into messages(thread_id,role,text,bot,routine_id) values(${tid},'user',${text},${bot},${rid}) returning id`;
+  const [m]=await q`insert into messages(thread_id,role,text,bot,routine_id,also_chat) values(${tid},'user',${text},${bot},${rid},${also}) returning id`;
   let url="", key="";
   try{ await q`create table if not exists config(key text primary key, value jsonb not null, updated_at timestamptz default now())`;
     const [c]=await q`select value from config where key='grokbot_webhook'`; url=String(c?.value?.url||"").trim(); key=String(c?.value?.key||"").replace(/[\r\n]/g,"").trim(); }catch(e){ console.error("[chat] config read failed", e?.message); }
@@ -26,7 +26,7 @@ export async function POST(req){
   else try{
     const origin=new URL(req.url).origin;
     const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${key}`},
-      body:JSON.stringify({message_id:String(m.id),thread_id:tid,text,bot,routine_id:rid,dashboard_url:`${origin}/?thread=${tid}`}),signal:AbortSignal.timeout(10000)});
+      body:JSON.stringify({message_id:String(m.id),thread_id:tid,text,bot,routine_id:rid,also_chat:also,dashboard_url:`${origin}/?thread=${tid}`}),signal:AbortSignal.timeout(10000)});
     delivered=r.ok; if(!r.ok){ reason=`webhook ${r.status}`; console.error("[chat] webhook non-2xx", r.status, (await r.text().catch(()=>"")).slice(0,200)); }
   }catch(e){
     const c=e?.cause; reason=`webhook unreachable: ${e?.name||"Error"}${c?.code?` ${c.code}`:""}${(c?.message||e?.message)?` - ${String(c?.message||e?.message).replaceAll(key,"[key]").slice(0,160)}`:""}`;

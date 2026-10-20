@@ -70,6 +70,8 @@ or tell your Grok Bot "set up GrugBot Console". it ask for secrets with secure s
 
 `box/SETUP.md` tell each bot how to register its routines.
 
+last piece: Grok Bot routine that catch console webhooks and do the work. prompt and setup steps in [`routine/`](routine/README.md).
+
 ## Database
 
 any recent Postgres work. grug test Postgres 17 and PGlite. Neon, Supabase, RDS, Cloud SQL, box in closet, all fine. app use plain `node-postgres`. nothing vendor special.
@@ -137,7 +139,7 @@ bearer routes want `Authorization: Bearer $ROUTINE_LOG_TOKEN` plus `x-vercel-pro
 1. make Vercel project from this repo. set `DATABASE_URL` to any Postgres (or add Neon from Vercel Marketplace, which set it for you). tables made on first request.
 2. turn on Deployment Protection (Vercel Authentication). make Protection Bypass for Automation secret for box scripts.
 3. set `ROUTINE_LOG_TOKEN` in project to long random string.
-4. make Grok Bot routine with webhook trigger. store its URL and key in `config` table under key `grokbot_webhook` as `{"url": "...", "key": "..."}`. env vars `GROKBOT_WEBHOOK_URL` and `GROKBOT_WEBHOOK_KEY` work as fallback.
+4. make Grok Bot routine with webhook trigger (prompt and steps in [`routine/`](routine/README.md)). store its URL and key in `config` table under key `grokbot_webhook` as `{"url": "...", "key": "..."}`. env vars `GROKBOT_WEBHOOK_URL` and `GROKBOT_WEBHOOK_KEY` work as fallback.
 5. on box, run `box/install.sh` like in Box setup above.
 
 ## Box logs

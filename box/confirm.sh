@@ -7,6 +7,9 @@ DIR="${ROUTINE_LOG_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 case "$2" in ok|fail) ;; *) echo "second arg must be ok|fail" >&2; exit 2;; esac
 python3 - "$DIR/.env" "$1" "$2" "${3:-{\}}" "${4:-}" <<'PY'
 import sys, json, urllib.request
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k): return None  # a 302 means auth/bypass failed: treat as error
+open_ = urllib.request.build_opener(NoRedirect).open
 p, rid, ok, fields, note = sys.argv[1:6]; env = {}
 for l in open(p):
     if "=" in l: k, v = l.rstrip("\n").split("=", 1); env[k] = v
@@ -18,7 +21,7 @@ for k in ("status", "schedule_or_trigger"):
 req = urllib.request.Request(env["ROUTINE_LOG_URL"].rstrip("/") + "/api/routines/confirm", data=json.dumps(body).encode(),
     headers={"content-type": "application/json", "authorization": "Bearer " + env["ROUTINE_LOG_TOKEN"], "x-vercel-protection-bypass": env.get("VERCEL_BYPASS", "")})
 try:
-    r = json.loads(urllib.request.urlopen(req, timeout=10).read()); print("confirmed" if r.get("applied") else "rejected", "message", r.get("message_id"))
+    r = json.loads(open_(req, timeout=10).read()); print("confirmed" if r.get("applied") else "rejected", "message", r.get("message_id"))
 except urllib.error.HTTPError as e: print("confirm failed: HTTP", e.code, file=sys.stderr); sys.exit(1)
 except Exception as e: print("confirm failed:", type(e).__name__, file=sys.stderr); sys.exit(1)
 PY

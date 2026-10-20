@@ -14,3 +14,5 @@ button{background:#1d2330;color:#fff;cursor:pointer}button:disabled{opacity:.5}
 .user{background:#1d2330;color:#fff;margin-left:auto}.grokbot{background:#eef0f3}.compose{display:flex;gap:8px}.compose textarea{flex:1;min-height:38px}
 .ghost{background:#fff;color:#1d2330}.link{background:none;border:none;color:#c5221f;text-decoration:underline;padding:0}
 .pending{background:#fff4ce;color:#9a6700;border-radius:10px;padding:2px 8px;font-size:12px;white-space:normal}.editor{background:#fafbfc}
+.badge-paused{background:#fde7e9;color:#c5221f;border-radius:10px;padding:2px 8px;font-size:12px;font-weight:600}
+.pager{display:flex;gap:8px;align-items:center;margin-top:10px}.logmsg{font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}

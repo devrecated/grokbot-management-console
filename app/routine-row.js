@@ -1,18 +1,18 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DAYS, build, isEvent } from "./schedule";
 export default function RoutineRow({r, last}){
   const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[note,setNote]=useState("");
   const [pending,setPending]=useState(r.pending_action);
   const [s,setS]=useState({freq:"weekdays",time:"08:00",days:[1],dom:1,n:15,minute:0,cron:"",date:"",timing:"exact"});
   const [trig,setTrig]=useState("");
+  useEffect(()=>{setPending(r.pending_action);},[JSON.stringify(r.pending_action)]);
   const event=isEvent(r.schedule_or_trigger);
   const b=build(s);
   const paused=r.status==="paused";
   async function act(body){
     setBusy(true); setNote("");
-    const also=typeof localStorage!=="undefined"&&localStorage.getItem("alsoChat")==="1";
-    const res=await fetch("/api/actions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routine_id:r.routine_id,also_chat:also,...body})});
+    const res=await fetch("/api/actions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routine_id:r.routine_id,...body})});
     const j=await res.json().catch(()=>({})); setBusy(false);
     if(!res.ok){ setNote("Error: "+(j.error||res.status)); return; }
     if(j.cancelled){ setPending(null); setNote("Cancelled"); return; }
@@ -24,7 +24,7 @@ export default function RoutineRow({r, last}){
   const showTime=["daily","weekdays","weekly","monthly","once"].includes(s.freq);
   return <><tr>
     <td>{r.name}<div className="muted">{r.routine_id}</div></td>
-    <td>{r.schedule_or_trigger}{paused&&<div className="skipped">paused</div>}</td>
+    <td>{r.schedule_or_trigger}{paused&&<div><span className="badge-paused">Paused</span></div>}</td>
     <td>{r.purpose}</td>
     <td>{last?<><span className={last.status}>{last.status}</span> {last.when}</>:<span className="muted">never</span>}</td>
     <td style={{whiteSpace:"nowrap"}}>
@@ -36,7 +36,7 @@ export default function RoutineRow({r, last}){
     {open&&!pending&&<tr><td colSpan={5} className="editor">
       {event?<div>
         <div><b>Trigger:</b> <span className="muted">{r.schedule_or_trigger} (event-triggered; read-only)</span></div>
-        <textarea style={{width:"100%",marginTop:6}} rows={2} placeholder="Describe the trigger change you want (e.g. 'Also run when a PR is merged in OWNER/site')" value={trig} onChange={e=>setTrig(e.target.value)}/>
+        <textarea style={{width:"100%",marginTop:6}} rows={2} placeholder="Describe the trigger change you want (e.g. 'Also run when a PR is merged in my-org/site')" value={trig} onChange={e=>setTrig(e.target.value)}/>
         <button disabled={busy||!trig.trim()} onClick={()=>act({action:"change_trigger",trigger_request:trig,human:`Change trigger: ${trig.slice(0,120)}`})}>Request trigger change</button>
       </div>:<div className="filters" style={{alignItems:"center"}}>
         <select value={s.freq} onChange={e=>set("freq",e.target.value)}>

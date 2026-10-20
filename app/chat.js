@@ -5,13 +5,14 @@ export default function Chat({routines,alwaysChat}){
   const [threads,setThreads]=useState([]),[tid,setTid]=useState(null),[msgs,setMsgs]=useState([]);
   const [text,setText]=useState(""),[bot,setBot]=useState(""),[rid,setRid]=useState(""),[busy,setBusy]=useState(false),[note,setNote]=useState(""),[also,setAlso]=useState(false);
   const end=useRef(null);
+  const awaiting=!!tid&&msgs.length>0&&msgs[msgs.length-1].role==="user"&&Date.now()-new Date(msgs[msgs.length-1].created_at)<30*60000;
   useEffect(()=>{const t=new URLSearchParams(location.search).get("thread"); if(t) setTid(t);},[]);
   const bots=[...new Set(routines.map(r=>r.bot))].sort();
   async function load(){
     const r=await fetch(`/api/chat${tid?`?thread_id=${encodeURIComponent(tid)}`:""}`,{cache:"no-store"}); if(!r.ok) return;
     const j=await r.json(); setThreads(j.threads); if(tid) setMsgs(j.messages);
   }
-  useEffect(()=>{load(); const i=setInterval(load,5000); return ()=>clearInterval(i);},[tid]);
+  useEffect(()=>{load(); const i=setInterval(()=>{if(document.visibilityState==="visible") load();},awaiting?5000:30000); return ()=>clearInterval(i);},[tid,awaiting]);
   useEffect(()=>{end.current?.scrollIntoView({block:"nearest"});},[msgs.length]);
   async function send(){
     if(!text.trim()) return; setBusy(true); setNote("");

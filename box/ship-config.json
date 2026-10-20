@@ -1,0 +1,6 @@
+{
+  "comment": "Which local log sources are shipped to the dashboard. fnmatch patterns against the source name. deny wins over allow.",
+  "allow": ["sand-*.log", "exec-daemon.log", "agent-store-fuse.log", "box-doctor.log", "egress-tunnel.log", "runs.jsonl", "registry.jsonl"],
+  "deny": ["dpkg.log", "alternatives.log", "history.log", "term.log", "chrome*", "x11vnc*", "novnc*", "xfwm4*", "plank*", "picom*", "sand-box-telemetry.log"],
+  "max_batch": 2000
+}

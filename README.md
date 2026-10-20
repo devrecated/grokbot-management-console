@@ -54,29 +54,69 @@ every command take `--dry-run`. it print API calls and change nothing. for scrip
 
 ## Box setup
 
-box is machine where bots run. after `grugbot init`, on box:
+box is machine where bots run. four steps. do once.
+
+**1. install box scripts**
 
 ```bash
 git clone https://github.com/OWNER/grokbot-routines.git
-# copy ~/.config/grugbot/box.env from your computer to $INSTALL_DIR/.env on the box, then chmod 600 it
+mkdir -p /workspace/grugbot-console
+# copy ~/.config/grugbot/box.env (from grugbot init) to /workspace/grugbot-console/.env
+chmod 600 /workspace/grugbot-console/.env
 INSTALL_DIR=/workspace/grugbot-console grokbot-routines/box/install.sh
 ```
 
-or tell your Grok Bot "set up GrugBot Console". it ask for secrets with secure secret request (never in chat), clone repo, run installer.
+what this do: copy scripts into `INSTALL_DIR`, start log loop. safe to run again (it is also how you update). setting missing? it print one line like `missing: VERCEL_BYPASS` and exit 3. never print secrets.
 
-`install.sh` safe to run again and again. it copy scripts into `INSTALL_DIR` (default `/workspace/grugbot-console`) and only replace files that changed. it never touch `.env`, `.token`, `logs/`, `runs.jsonl`, `registry.jsonl`, or `ship-config.json` you edited. if setting missing, it say one line like `missing: VERCEL_BYPASS` and exit 3. it never print your secrets. it start log loop only if loop not already running.
+**2. make dashboard inbox routine**
 
-`ensure-running.sh` is tiny. if loop alive, return in few milliseconds. if loop dead, start it. routines run it when they wake, so loop come back after reboot.
+follow [`routine/README.md`](routine/README.md): new Grok Bot routine, webhook trigger, paste [`routine/dashboard-inbox.prompt.md`](routine/dashboard-inbox.prompt.md).
 
-`box/SETUP.md` tell each bot how to register its routines.
+what this do: routine catch console buttons and chat, do the routine work, report back.
 
-last piece: Grok Bot routine that catch console webhooks and do the work. prompt and setup steps in [`routine/`](routine/README.md).
+**3. tell console the webhook**
+
+put routine's webhook URL and key in database (no redeploy needed):
+
+```sql
+insert into config(key, value, updated_at)
+values ('grokbot_webhook', '{"url": "https://...", "key": "..."}'::jsonb, now())
+on conflict (key) do update set value = excluded.value, updated_at = now();
+```
+
+or set Vercel env vars `GROKBOT_WEBHOOK_URL` + `GROKBOT_WEBHOOK_KEY` and run `grugbot deploy`. database wins if both set.
+
+**4. check it work**
+
+- top bar of console show box with green dot (pinged under 2 minutes ago).
+- send message on `/chat`. note under it say "Delivered to Grok Bot".
+- `grugbot doctor` say all good.
+
+lazy way: tell your Grok Bot "set up GrugBot Console". it ask for secrets with secure secret request (never in chat) and do step 1.
+
+<details>
+<summary>box script reference</summary>
+
+| Script | What it do |
+|---|---|
+| `install.sh` | install or update. keeps `.env`, `.token`, `logs/`, `runs.jsonl`, `registry.jsonl`, your edited `ship-config.json` |
+| `ensure-running.sh` | start log loop if dead. few milliseconds if alive. routines run it on wake, so loop survive reboot |
+| `register.sh bot bot_id routine_id name schedule_or_trigger purpose [active\|paused]` | add or update routine on console |
+| `log-run.sh bot routine_id ok\|error\|skipped summary` | record one run |
+| `reply.sh thread_id text` | Grok Bot reply into chat thread |
+| `confirm.sh routine_id ok\|fail ['{json}'] ['note']` | finish (or reject) pending change |
+| `prompt.sh routine_id prompt_file` | send routine prompt to console (answer to fetch) |
+| `logs.sh [-s source] [-l level] [-t 2h] [-g text] [-n 50]` / `logs.sh sources` | read local log copy |
+
+`.env` keys: `ROUTINE_LOG_URL`, `ROUTINE_LOG_TOKEN`, `VERCEL_BYPASS`. how each bot register its routines: [`box/SETUP.md`](box/SETUP.md).
+
+</details>
 
 ## Database
 
-any recent Postgres work. grug test Postgres 17 and PGlite. Neon, Supabase, RDS, Cloud SQL, box in closet, all fine. app use plain `node-postgres`. nothing vendor special.
+any recent Postgres work (grug test Postgres 17 and PGlite). Neon, Supabase, RDS, box in closet. tables made on first request.
 
-database user need `CONNECT` on database and `USAGE` plus `CREATE` on one schema (normally `public`). tables made on first request. small locked-down user look like this:
+user need only this:
 
 ```sql
 create user grugbot password '...';
@@ -84,40 +124,52 @@ grant connect on database grugbot to grugbot;
 grant usage, create on schema public to grugbot;
 ```
 
-TLS: put `sslmode` in URL (`require`, `verify-full` or `disable`). no `sslmode` and not localhost? then TLS on, certificate checked. `DATABASE_SSL=no-verify` for self-signed certificate. `DATABASE_SSL=off` turn TLS off.
+| TLS setting | Effect |
+|---|---|
+| `sslmode=require` / `verify-full` / `disable` in URL | used as given |
+| no `sslmode`, not localhost | TLS on, certificate checked |
+| `DATABASE_SSL=no-verify` | TLS on, self-signed OK |
+| `DATABASE_SSL=off` | TLS off |
 
 ## Demo mode
 
-set `DEMO_MODE=1` and leave `DATABASE_URL` empty. app then run on in-memory Postgres (PGlite) filled from `lib/demo-fixtures.js`: four fake bots, their routines, week of runs, logs, chat threads, heartbeats.
+`DEMO_MODE=1`, no `DATABASE_URL`. app run on in-memory Postgres (PGlite) filled from `lib/demo-fixtures.js`. browser writes faked by `public/demo-shim.js` (gone when tab close). server answer every POST with fake "ok" (`middleware.js`). nothing saved, ever.
 
-browser writes faked in page by `public/demo-shim.js` and kept in sessionStorage. close tab, all gone. on server, `middleware.js` answer every POST with fake "ok", so nothing stored. public demo is this mode on own Vercel project with Vercel Authentication off.
-
-## How it fit together
+## How it work
 
 ```mermaid
 flowchart LR
   subgraph Box["Bot machine (box)"]
     R[Routines] -->|register.sh / log-run.sh| API
-    W[Webhook routine] -->|reply.sh / confirm.sh| API
-    C[collect-logs.sh<br/>local SQLite] -->|ship_logs.py<br/>gzip batch, 60s| API
+    W[Inbox routine] -->|reply.sh / confirm.sh| API
+    C[collect-logs.sh<br/>local SQLite] -->|ship_logs.py<br/>gzip batch| API
   end
   subgraph Vercel["Vercel (Deployment Protection on)"]
     UI[Dashboard pages] --- API[API routes]
   end
   API <--> DB[(Postgres)]
   You((You)) -->|Vercel login| UI
-  API -->|chat + actions| HOOK[Grok Bot webhook trigger] --> W
+  API -->|chat + actions| HOOK[Grok Bot webhook] --> W
 ```
 
-pause work like this. grug click Pause. app store pending change and send it to Grok Bot webhook. bot that own routine make change, then call `confirm.sh`. that clear pending flag and set new status. page check every 5 seconds while something pending, once a minute otherwise, and stop checking when tab hidden.
+life of a Pause click:
 
-## Pages
+1. grug click Pause. console save pending change.
+2. console send it to Grok Bot webhook.
+3. inbox routine make change (or ask owner bot to).
+4. routine run `confirm.sh`. pending clear, status update.
+5. page notice. (page check every 5 s while something pending, every minute otherwise, never while tab hidden.)
 
-- `/bots` list bots and what they been doing. `/` show routines grouped by bot, with buttons and run history. `/chat` hold Grok Bot threads.
-- `/logs` show box logs. filter by source, level, instance, time, text or regex.
-- `/settings` hold "Always reply in Grok Bot chat" and ship interval. value live in `config` table so webhook routine can read it, and go out as `also_chat` on every chat and action payload.
+| Page | What |
+|---|---|
+| `/bots` | bots and what they been doing |
+| `/` | routines by bot, buttons, run history |
+| `/chat` | Grok Bot threads |
+| `/logs` | box logs, filter by source, level, instance, time, text, regex |
+| `/settings` | "Always reply in Grok Bot chat" (sent as `also_chat`), log ship interval |
 
-## API
+<details>
+<summary>API reference</summary>
 
 | Route | Auth | Purpose |
 |---|---|---|
@@ -130,72 +182,91 @@ pause work like this. grug click Pause. app store pending change and send it to 
 | `POST /api/logs` | bearer | batch log ingest, JSON array, gzip allowed |
 | `/api/chat`, `/api/actions`, `/api/settings` | Vercel login | used by the dashboard |
 
-bearer routes want `Authorization: Bearer $ROUTINE_LOG_TOKEN` plus `x-vercel-protection-bypass` header, because Deployment Protection stand in front of everything.
+bearer = `Authorization: Bearer $ROUTINE_LOG_TOKEN` plus `x-vercel-protection-bypass` header.
 
-## Manual setup (no grugbot)
+</details>
 
-`grugbot init` do steps 1 to 3. by hand:
+<details>
+<summary>env vars</summary>
 
-1. make Vercel project from this repo. set `DATABASE_URL` to any Postgres (or add Neon from Vercel Marketplace, which set it for you). tables made on first request.
-2. turn on Deployment Protection (Vercel Authentication). make Protection Bypass for Automation secret for box scripts.
-3. set `ROUTINE_LOG_TOKEN` in project to long random string.
-4. make Grok Bot routine with webhook trigger (prompt and steps in [`routine/`](routine/README.md)). store its URL and key in `config` table under key `grokbot_webhook` as `{"url": "...", "key": "..."}`. env vars `GROKBOT_WEBHOOK_URL` and `GROKBOT_WEBHOOK_KEY` work as fallback.
-5. on box, run `box/install.sh` like in Box setup above.
+| Where | Name | What |
+|---|---|---|
+| Vercel | `DATABASE_URL` | Postgres connection |
+| Vercel | `ROUTINE_LOG_TOKEN` | bearer token for box scripts |
+| Vercel | `DATABASE_SSL` | optional: `no-verify` or `off` |
+| Vercel | `DEMO_MODE` | `1` for demo, no database |
+| Vercel | `GROKBOT_WEBHOOK_URL`, `GROKBOT_WEBHOOK_KEY` | fallback if `grokbot_webhook` not in `config` table |
+| box `.env` | `ROUTINE_LOG_URL`, `ROUTINE_LOG_TOKEN`, `VERCEL_BYPASS` | how box reach console |
 
-## Box logs
+</details>
 
-`collect-logs.sh` read new lines from `/var/log`, `/tmp`, tool caches, files running processes write to, kernel log, journal, and per-minute network summary. it put them in `logs/box-logs.db` (SQLite) next to scripts. it remember read offset per file. it redact anything that look like token, password, key, JWT or URL with credentials. it delete lines older than 30 days and cap file at 50 MB. shell histories, `.env` and token files, and agent transcripts never read. grug not snoop.
+<details>
+<summary>manual setup (no grugbot)</summary>
 
-`ship_logs.py` send only new lines from allowed sources, redacted second time, in one gzipped POST. nothing new? no request. edit `ship-config.json` to change allow and deny lists. by default everything readable shipped. `catalog` block in that file feed the (i) tooltip on Logs page.
+1. make Vercel project from this repo. set `DATABASE_URL` (or add Neon from Vercel Marketplace).
+2. turn on Vercel Authentication. make Protection Bypass for Automation secret.
+3. set `ROUTINE_LOG_TOKEN` to long random string.
+4. do Box setup above.
 
-`start-log-loop.sh` run both on ship interval from Settings (15 seconds to 10 minutes, default 1 minute; box re-read it at most every 5 minutes) at lowest CPU and IO priority. plain sleep loop. no cron. nothing keep machine awake. run `logs.sh sources` or `logs.sh -s exec-daemon -l error -t 2h -g timeout` to read local copy.
+</details>
 
-server keep 7 days and at most 200,000 log rows, pruned on each ingest.
+## What box send
 
-## Routine prompts
+grug not snoop. box send only this:
 
-"Edit prompt" on routine ask owning bot for its current prompt (`fetch_prompt`). bot answer with `box/prompt.sh <routine_id> <file>`. grug edit it next to line diff and save. that make pending `set_prompt` change. bot apply it and confirm with `confirm.sh <id> ok '{"prompt":"..."}'`. prompts live only in database behind Vercel Authentication, never in this repo.
+| Thing | What leave box | Kept on server |
+|---|---|---|
+| logs | new lines from allowed sources, redacted twice, gzipped | 7 days, max 200,000 rows |
+| bot activity | time, bot, event or tool name, target bot name. no commands, args, messages, results | 7 days, max 50,000 events |
+| bot profiles | name, title, description, colour from `profile.json`. bot ids hashed | latest |
+| heartbeat | hashed `machine_id` (stable) and `instance_id` (per boot), hostname, boot time, version | 30 days |
+| prompts | only when you ask (Edit prompt) | in database, never in repo |
 
-## Bots tab
+<details>
+<summary>log details</summary>
 
-`bot_sync.py` run in same loop. it read each bot's `profile.json` (name, title, description, colour) and send them when they change. bot ids hashed before they leave box.
+- `collect-logs.sh` read new lines from `/var/log`, `/tmp`, tool caches, files running processes write, kernel log, journal, per-minute network summary, into `logs/box-logs.db` (SQLite). local copy kept 30 days, max 50 MB.
+- never read: shell histories, `.env` and token files, agent transcript content.
+- redaction catch things that look like token, password, key, JWT, URL with credentials. patterns miss some. check `ship-config.json` before allowing new source.
+- `ship-config.json` hold allow/deny lists and `catalog` (feed Logs page (i) tooltip).
+- loop run at lowest CPU and IO priority on ship interval from Settings (15 s to 10 min, default 1 min, box re-read setting at most every 5 min). nothing new = no request, just heartbeat at most every 5 min.
+- top bar dot: green under 2 min since ping, amber under 10, grey after.
 
-it also build activity feed per bot from agent audit log and transcripts. each event keep four things only: time, bot, event or tool name (like `shell` or `web_search`), and target bot name when one bot hand work to another. commands, arguments, messages and results never read into feed. transcripts have no timestamps, so event get time loop first saw it; first sync use file modified time. server keep 7 days and 50,000 events.
+</details>
 
-## Instances
-
-every batch from box carry two hashed ids. `machine_id` is hash of `/etc/machine-id`, same across reboots. `instance_id` hash machine-id plus kernel boot id, so each boot get new one. raw ids never leave box. server keep one heartbeat row per instance: hostname, boot time, version, first seen, last ping. every log row stamped with its instance.
-
-nothing new to ship? box send small heartbeat at most every 5 minutes. top bar show latest box and how long since ping: green under 2 minutes, amber under 10, grey after. hover to see recent instances. Logs table have Instance column and filter.
-
-## Security notes
+## Security
 
 - every page and route behind Vercel Authentication. bot routes also need bearer token.
-- secrets live in Vercel env vars, database `config` table and box `.env`. never in repo. `.gitignore` keep out `.env*`, `*.token`, `*.jsonl` and key files.
-- scripts never print tokens. webhook errors hide the key.
-- `confirm.sh` and `reply.sh` exit nonzero on any non-2xx or redirect, so broken bypass secret show up as failure, not silence.
-- redaction use patterns and will miss some secrets. look at `ship-config.json` before allowing new source.
+- secrets only in Vercel env vars, database `config` table, box `.env`. never in repo.
+- scripts never print tokens. webhook errors hide key.
+- `confirm.sh` and `reply.sh` fail loud on any non-2xx or redirect, so broken bypass secret not fail quiet.
 
 ## Cost
 
-on Vercel plan you already have, plus free Postgres tier, this cost nothing. log shipping add at most one small function call per ship interval while box on, about 43,000 a month at default of one minute. on serverless database like Neon, one write a minute keep compute awake while box run, so watch compute hours on free plan. longer ship interval in Settings let it sleep between batches.
+free on Vercel plan you have plus free Postgres tier. about 43,000 small requests a month at default 1-minute ship interval. serverless database like Neon stay awake while box ship every minute; longer interval in Settings let it sleep.
 
 ## Releasing
 
-releases built by GoReleaser from `.goreleaser.yaml` when `v*` tag pushed (`.github/workflows/release.yml`). it build `grugbot` for macOS, Linux and Windows on amd64 and arm64, bundle web app into binary (`cli/scripts/bundle.sh`), write `checksums.txt` (SHA-256), and make **draft** GitHub release. human press publish. grug like human press publish.
+1. push `v*` tag.
+2. GitHub Actions run GoReleaser: build `grugbot` for macOS, Linux, Windows (amd64 + arm64), bundle web app inside, write `checksums.txt`.
+3. it make **draft** release. human press publish.
 
-- Homebrew: with `HOMEBREW_TAP_TOKEN` secret, GoReleaser push cask to `OWNER/homebrew-tap`. `packaging/homebrew/grugbot.rb.tmpl` is same thing as formula, for doing by hand.
-- winget: fill `packaging/winget/OWNER.grugbot.yaml` from `checksums.txt` and submit to `microsoft/winget-pkgs`.
+<details>
+<summary>packaging and tests</summary>
 
-local check: `goreleaser release --snapshot --clean`. CLI tests: `cd cli && GRUGBOT_TEST_DB=postgres://... go test ./...` run `init` end to end against fake Vercel API and real Postgres.
+- Homebrew: set `HOMEBREW_TAP_TOKEN` secret and GoReleaser push cask to `OWNER/homebrew-tap`. by-hand formula: `packaging/homebrew/grugbot.rb.tmpl`.
+- winget: fill `packaging/winget/OWNER.grugbot.yaml` from `checksums.txt`, submit to `microsoft/winget-pkgs`.
+- local build check: `goreleaser release --snapshot --clean`
+- CLI tests: `cd cli && GRUGBOT_TEST_DB=postgres://... go test ./...` (runs `init` end to end against fake Vercel API and real Postgres)
+- `docs/init.gif` made with [VHS](https://github.com/charmbracelet/vhs) from `docs/init.tape`, against fake Vercel API (`cli/cmd/fakevercel`). no real token, no real database.
 
-GIF above made with [VHS](https://github.com/charmbracelet/vhs) from `docs/init.tape`, against same fake Vercel API (`cli/cmd/fakevercel`) and throwaway local Postgres. no real token, no real database.
+</details>
 
 ## Philosophy
 
-code follow [grug brain](https://grugbrain.dev) way: complexity very, very bad. plain React and plain CSS, no UI kit. one exception: Logs table use TanStack Table and TanStack Virtual (headless, no styling), because sorting and drawing thousands of rows is part worth not hand-rolling. one file per page when possible. nothing clever that tired grug can't read at 2 AM.
+code follow [grug brain](https://grugbrain.dev) way: complexity very, very bad. plain React, plain CSS, no UI kit. one exception: Logs table use TanStack Table + Virtual, because thousands of rows worth not hand-rolling. nothing clever that tired grug can't read at 2 AM.
 
-thank you grugbrain.dev for words of wisdom. go read it. it short. it good.
+thank you grugbrain.dev. go read it. it short. it good.
 
 ## License
 

@@ -15,12 +15,13 @@ export async function POST(req){
   const b=await req.json(); const text=String(b.text||"").trim().slice(0,8000);
   if(!text) return Response.json({error:"text required"},{status:400});
   const q=sql(); await ensureMessages(q); const also=b.also_chat===true||(await getSettings(q)).always_reply_in_chat;
-  const tid=b.thread_id||randomUUID();
+  const edit=b.kind==="edit_request"; // Settings > Editor card: a change request for the console itself, meant for the user's editor bot
+  const tid=b.thread_id||(edit?"edit:"+randomUUID():randomUUID());
   let bot=b.bot||null, rid=b.routine_id||null;
   if(b.thread_id){ const [f]=await q`select bot,routine_id from messages where thread_id=${tid} order by created_at limit 1`; if(f){bot??=f.bot;rid??=f.routine_id;} }
   const [m]=await q`insert into messages(thread_id,role,text,bot,routine_id,also_chat) values(${tid},'user',${text},${bot},${rid},${also}) returning id`;
   const origin=new URL(req.url).origin;
-  const {delivered,reason}=await forward(q,{message_id:String(m.id),thread_id:tid,text,bot,routine_id:rid,also_chat:also,dashboard_url:`${origin}/?thread=${tid}`});
+  const {delivered,reason}=await forward(q,{...(edit?{kind:"edit_request"}:{}),message_id:String(m.id),thread_id:tid,text,bot,routine_id:rid,also_chat:also,dashboard_url:`${origin}/chat?thread=${encodeURIComponent(tid)}`});
   await q`update messages set delivered=${delivered} where id=${m.id}`;
   return Response.json({ok:true,message_id:String(m.id),thread_id:tid,delivered,reason});
 }

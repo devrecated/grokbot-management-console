@@ -12,6 +12,24 @@ demo use fake bots and fake data. click all buttons. nothing break. nothing save
 
 app is Next.js on Vercel plus any Postgres. few small shell and Python scripts live on box and talk to app over HTTPS. that it. no kubernetes. no message queue. grug happy.
 
+## Why grug keep it simple
+
+grug not like complexity demon. so console run in minutes, for free.
+
+- **Vercel account** (free, no card) deploy Next.js. click, done.
+- need server anyway, so **Next.js**: pages and API in one place.
+- need data store, so **Postgres**. where it live not matter. lazy grug use free **Neon** through Vercel: run few commands, click few buttons.
+- UI is **plain CSS**. no design system to learn.
+- core is small on purpose. build on it for any use case. too lazy? make [editor bot](grugbot-editor/) and ask it.
+
+| Dependency | Why |
+|---|---|
+| Next.js | one app for pages and API routes; Vercel deploy it free |
+| Postgres (`pg`) | boring, everywhere, free tiers; plain SQL, no ORM |
+| TanStack Table + Virtual | Logs and Bots tables stay fast with 200k rows; headless, so still plain CSS |
+| nodemailer | email alerts over any SMTP; only one path |
+| Go CLI (`grugbot`) | one binary sets up Vercel, database, secrets; no Node needed for setup |
+
 ## Install grugbot
 
 `grugbot` is small CLI. it set up console for you.
@@ -186,7 +204,7 @@ life of a Pause click:
 | `/logs` | box logs, filter by source, level, instance, time, text, regex |
 | `/box` | one row per boot: start, last heartbeat, OS, which bots used box and when, CPU and memory sparklines |
 | `/usage` | runs, run minutes, actions per bot then per routine, plus **estimate** from your own rates |
-| `/settings` | chat mirroring, time zone, ship and heartbeat interval, stale-box threshold, log retention, email alerts and templates, cost rates |
+| `/settings` | Editor card (ask your editor bot for app changes), chat mirroring, time zone, ship and heartbeat interval, stale-box threshold, log retention, email alerts and templates, cost rates |
 
 <details>
 <summary>API reference</summary>
@@ -218,6 +236,7 @@ bearer = `Authorization: Bearer $ROUTINE_LOG_TOKEN` plus `x-vercel-protection-by
 | Vercel | `GROKBOT_WEBHOOK_URL`, `GROKBOT_WEBHOOK_KEY` | fallback if `grokbot_webhook` not in `config` table |
 | Vercel | `SMTP_URL` | optional: `smtps://user:pass@smtp.example.com:465` turn on email alerts |
 | Vercel | `ALERT_FROM` | optional: from address for alerts |
+| Vercel | `NEXT_PUBLIC_REPO_URL` | optional: your fork URL, used for demo "Get your own" and Settings editor docs link |
 | box `.env` | `ROUTINE_LOG_URL`, `ROUTINE_LOG_TOKEN`, `VERCEL_BYPASS` | how box reach console |
 
 </details>

@@ -85,3 +85,4 @@ pre.taskout{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:6px
 button.wake{display:inline-flex;gap:6px;align-items:center;background:#2b3345;color:#fff;border:1px solid #3d475c;padding:3px 10px;font-size:12px;border-radius:14px}
 button.wake.awake{background:transparent}button.wake:disabled{opacity:.85;cursor:wait}
 .spin{width:10px;height:10px;border:2px solid #9aa4b8;border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.lv-bar select{max-width:220px}

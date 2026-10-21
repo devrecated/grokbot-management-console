@@ -11,7 +11,7 @@ export default function RoutinesTable({routines}){
   const data=useMemo(()=>routines.filter(r=>(!bot||r.bot===bot)&&(!st||r.status===st)),[routines,bot,st]);
   const expanded=useMemo(()=>Object.fromEntries(Object.entries(ui).filter(([,v])=>v.mode&&!v.pending).map(([k])=>[k,true])),[ui]);
   const columns=useMemo(()=>[
-    {id:"bot",header:"Bot",accessorKey:"bot",size:120},
+    {id:"bot",header:"Bot",accessorKey:"bot",size:130,cell:c=><div title={c.getValue()} style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.getValue()}</div>},
     {id:"name",header:"Routine",accessorKey:"name",size:230,cell:({row})=><>{row.original.name}<div className="muted" style={{fontSize:11}}>{row.original.routine_id}</div></>},
     {id:"sched",header:"Schedule / trigger",accessorKey:"schedule_or_trigger",size:200,cell:({row})=><>{row.original.schedule_or_trigger}{row.original.status==="paused"&&<div><span className="badge-paused">Paused</span></div>}</>},
     {id:"purpose",header:"Purpose",accessorKey:"purpose",size:300,cell:c=><span style={{whiteSpace:"normal"}}>{c.getValue()}</span>},

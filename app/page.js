@@ -18,7 +18,7 @@ export default async function Page(){
   for(const r of runs) if(!reg.some(x=>x.routine_id===r.routine_id)&&!(byBot[r.bot]??=[]).some(x=>x.routine_id===r.routine_id)) byBot[r.bot].push({routine_id:r.routine_id,name:"(unregistered)"});
   const names=Object.fromEntries(reg.map(r=>[r.routine_id,r.name]));
   const routines=reg.map(r=>({bot:r.bot,routine_id:r.routine_id,name:r.name}));
-  return <><Refresher pending={reg.some(r=>r.pending_action||(r.prompt_requested_at&&Date.now()-new Date(r.prompt_requested_at)<600000))}/><Nav active="routines" right={<span className="muted">Updated {fmt(new Date())}</span>}/>
+  return <><Refresher pending={reg.some(r=>r.pending_action||(r.prompt_requested_at&&Date.now()-new Date(r.prompt_requested_at)<600000))}/><Nav active="routines" right={<span className="muted" style={{fontSize:12,whiteSpace:"nowrap"}}>Updated {new Date().toLocaleTimeString("en-US",{timeZone:tz,hour:"numeric",minute:"2-digit"})}</span>}/>
   <main style={{maxWidth:1400}}>
   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h2>Routines by bot</h2><PauseAll active={reg.filter(r=>r.status==="active"&&!r.pending_action).length} paused={reg.filter(r=>r.status==="paused"&&!r.pending_action).length}/></div>
   <RoutinesTable routines={reg.map(r=>({routine_id:r.routine_id,name:r.name,bot:r.bot,schedule_or_trigger:r.schedule_or_trigger,purpose:r.purpose,status:r.status,pending_action:r.pending_action,prompt_text:r.prompt_text,prompt_fetched_at:r.prompt_fetched_at?String(r.prompt_fetched_at):null,prompt_requested_at:r.prompt_requested_at?String(r.prompt_requested_at):null,tz,tzl,

@@ -8,7 +8,7 @@ export default function Runs({runs,names}){
   const data=useMemo(()=>runs.filter(r=>(!bot||r.bot===bot)&&(!st||r.status===st)),[runs,bot,st]);
   const columns=useMemo(()=>[
     {id:"t",header:"Time",accessorKey:"ts",size:190,cell:({row})=>row.original.when},
-    {id:"bot",header:"Bot",accessorKey:"bot",size:120},
+    {id:"bot",header:"Bot",accessorKey:"bot",size:130,cell:c=><div title={c.getValue()} style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.getValue()}</div>},
     {id:"rt",header:"Routine",accessorFn:r=>names[r.routine_id]||r.routine_id,size:220},
     {id:"st",header:"Status",accessorKey:"status",size:80,cell:c=><span className={c.getValue()}>{c.getValue()}</span>},
     {id:"sum",header:"Summary",accessorKey:"summary",size:560,enableSorting:false,cell:c=><span style={{whiteSpace:"normal"}}>{c.getValue()}</span>},

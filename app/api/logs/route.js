@@ -37,6 +37,7 @@ export async function POST(req){
 // range=1h|6h|24h|7d or from/to ISO; around=<id> (+-1 min of that row); before/after=<id> for paging and live.
 const RANGES={"1h":1,"6h":6,"24h":24,"7d":168}, PER=200;
 const list=v=>(v||"").split(",").map(x=>x.trim()).filter(Boolean).slice(0,50);
+import { originOf } from "@/lib/collapse-logs";
 export async function GET(req){
   const p=new URL(req.url).searchParams, q=sql(); await ensureLogs(q);
   const inst=list(p.get("instance")), src=list(p.get("source")), lvl=list(p.get("level")), xsrc=list(p.get("xsource")), xlvl=list(p.get("xlevel"));
@@ -53,6 +54,8 @@ export async function GET(req){
     and (${text}='' or message ilike ${"%"+text+"%"}) and (${re}='' or message ~* ${re})
     and (${before}=0 or id<${before}) and (${after}=0 or id>${after}) order by id desc limit ${around?2000:PER}`; }
   catch(e){ return Response.json({error:"bad filter (check the regex)"},{status:400}); }
+  let bots=[]; try{ bots=await q`select key, name from bots`; }catch{}
+  rows=rows.map(r=>({...r,origin:originOf(r.source,bots)}));
   if(p.get("meta")!=="1") return Response.json({rows,per:PER});
   const facets=await q`select source, level, coalesce(instance_id,'') instance_id, count(*)::int n from logs where ts >= ${from.toISOString()} and ts <= ${to.toISOString()} group by source, level, instance_id`;
   const [cat]=await q`select value from config where key='log_catalog'`;

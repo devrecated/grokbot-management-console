@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactTable, getCoreRowModel, getSortedRowModel, getFilteredRowModel, getExpandedRowModel, flexRender } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import Info from "./info";
+import { collapse } from "@/lib/collapse-logs";
 const RANGES=["15m","1h","6h","24h","7d"], LEVELS=["error","warn","info","debug"];
 const EMPTY={instance:[],source:[],level:[],xsource:[],xlevel:[],q:"",re:"",range:"24h",from:"",to:"",around:""};
 const LISTS=["instance","source","level","xsource","xlevel"];
@@ -53,22 +54,23 @@ export default function Viewer({grug,tz}){
   function pick(kind,v,e){ e.stopPropagation(); const inc=kind, exc="x"+kind; // click = only this, shift-click = exclude
     set(e.shiftKey?{[exc]:f[exc].includes(v)?f[exc].filter(x=>x!==v):[...f[exc],v],[inc]:f[inc].filter(x=>x!==v)}:{[inc]:f[inc].includes(v)?f[inc].filter(x=>x!==v):[...f[inc],v],[exc]:f[exc].filter(x=>x!==v)}); }
   const terms=[f?.q&&{v:f.q},f?.re&&{v:f.re,re:true},quick&&{v:quick}];
-  const data=useMemo(()=>{ const ids=new Set(rows.map(r=>r.id)); return [...Object.values(pinned).filter(r=>!ids.has(r.id)),...rows]; },[rows,pinned]);
+  const data=useMemo(()=>{ const c=collapse(rows), ids=new Set(c.map(r=>r.id)); return [...Object.values(pinned).filter(r=>!ids.has(r.id)),...c]; },[rows,pinned]);
   const columns=useMemo(()=>[
     {id:"pin",header:"",size:34,enableSorting:false,enableResizing:false,enableHiding:false,cell:({row})=><button title="pin to top" className={"ghost cp"+(pinned[row.original.id]?" pinned":"")} onClick={e=>{e.stopPropagation();togglePin(row.original);}}>📌</button>},
     {id:"t",header:`Time (${tzLabel(TZ)})`,accessorKey:"ts",size:160,cell:c=>fmt(c.getValue())},
     {id:"level",header:"Level",accessorKey:"level",size:76,cell:c=><span className={`pill ${c.getValue()}`} onClick={e=>pick("level",c.getValue(),e)} title="click: filter · shift-click: exclude">{c.getValue()}</span>},
-    {id:"s",header:"Source",accessorKey:"source",size:210,cell:c=><span className="val" onClick={e=>pick("source",c.getValue(),e)} title="click: filter · shift-click: exclude">{c.getValue()}</span>},
+    {id:"o",header:"Source",accessorFn:r=>r.origin||"system",size:110,cell:c=><span className={c.getValue()==="system"?"muted":""}>{c.getValue()}</span>},
+    {id:"s",header:"File",accessorKey:"source",size:190,cell:c=><span className="val" onClick={e=>pick("source",c.getValue(),e)} title="click: filter · shift-click: exclude">{c.getValue()}</span>},
     {id:"inst",header:"Instance",accessorFn:r=>r.instance_id||"",size:80,cell:c=>c.getValue()?<span className="val" title={c.getValue()} onClick={e=>{e.stopPropagation();set({instance:f.instance.includes(c.getValue())?f.instance.filter(x=>x!==c.getValue()):[...f.instance,c.getValue()]});}}>{c.getValue().slice(0,6)}</span>:<span className="muted">–</span>},
     {id:"m",header:"Message",accessorKey:"message",size:700,enableSorting:false,cell:({row,getValue})=>row.getIsExpanded()
-      ?<><Mark text={getValue()} terms={terms}/><div className="row-acts"><span className="muted">id {row.original.id} · {row.original.ts}</span>
+      ?<><Mark text={getValue()} terms={terms}/><div className="row-acts"><span className="muted">id {row.original.id} · {row.original.ts}{row.original.count>1&&` · repeated ${row.original.count}× until ${fmt(row.original.last_ts)}`}</span>
         <button className="ghost cp" onClick={e=>{e.stopPropagation();setF({...EMPTY,range:"",around:String(row.original.id)});}}>Show ±1 min around</button></div></>
-      :<Mark text={getValue().slice(0,240)} terms={terms}/>},
+      :<>{row.original.count>1&&<span className="pill" title={`${row.original.count} identical lines in a row, ${fmt(row.original.first_ts)} to ${fmt(row.original.last_ts)}`}>×{row.original.count}</span>} <Mark text={getValue().slice(0,240)} terms={terms}/></>},
     {id:"cp",header:"",size:60,enableSorting:false,enableResizing:false,cell:({row})=><button className="ghost cp" onClick={e=>{e.stopPropagation();copy(row.original);}}>{copied===row.original.id?"copied":"copy"}</button>},
   ],[copied,pinned,JSON.stringify(f),quick]);
   const rowPinning=useMemo(()=>({top:Object.keys(pinned)}),[pinned]);
   const table=useReactTable({data,columns,getRowId:r=>String(r.id),columnResizeMode:"onChange",enableRowPinning:true,keepPinnedRows:true,
-    state:{sorting,globalFilter:quick,expanded,rowPinning,columnVisibility:colVis,columnSizing:colSize,columnPinning:{left:["pin","t","level","s"]}},
+    state:{sorting,globalFilter:quick,expanded,rowPinning,columnVisibility:colVis,columnSizing:colSize,columnPinning:{left:["pin","t","level","o"]}},
     onSortingChange:setSorting,onGlobalFilterChange:setQuick,onExpandedChange:setExpanded,onColumnVisibilityChange:setColVis,onColumnSizingChange:setColSize,
     getRowCanExpand:()=>true,globalFilterFn:"includesString",
     getCoreRowModel:getCoreRowModel(),getSortedRowModel:getSortedRowModel(),getFilteredRowModel:getFilteredRowModel(),getExpandedRowModel:getExpandedRowModel()});
@@ -84,9 +86,9 @@ export default function Viewer({grug,tz}){
   const chips=[...f.instance.map(v=>["instance",v,"+"]),...f.source.map(v=>["source",v,"+"]),...f.level.map(v=>["level",v,"+"]),...f.xsource.map(v=>["xsource",v,"−"]),...f.xlevel.map(v=>["xlevel",v,"−"])];
   return <>
     <div className="grug-head">{grug}<div><h2 style={{margin:0,display:"flex",gap:8,alignItems:"center"}}>Box logs <Info catalog={meta.catalog}/></h2>
-      <div className="muted" style={{fontSize:12}}>one table. complexity very bad. click a source or level to filter, shift-click to exclude.</div></div></div>
+      <div className="muted" style={{fontSize:12}}>one table. complexity very bad. same line many times = one row with ×count. click a file or level to filter, shift-click to exclude.</div></div></div>
     <div className="lv-bar">
-      <Multi label="Source" values={counts("source")} inc={f.source} exc={f.xsource} onChange={(a,b)=>set({source:a,xsource:b})}/>
+      <Multi label="File" values={counts("source")} inc={f.source} exc={f.xsource} onChange={(a,b)=>set({source:a,xsource:b})}/>
       <Multi label="Instance" values={counts("instance_id").filter(([v])=>v).map(([v,n])=>[v,n])} inc={f.instance} exc={[]} onChange={a=>set({instance:a})}/>
       <Multi label="Level" values={counts("level").sort((a,b)=>LEVELS.indexOf(a[0])-LEVELS.indexOf(b[0]))} inc={f.level} exc={f.xlevel} onChange={(a,b)=>set({level:a,xlevel:b})}/>
       <form onSubmit={e=>{e.preventDefault(); set(draft.mode==="regex"?{re:draft.re||draft.q,q:""}:{q:draft.q||draft.re,re:""});}} style={{display:"flex",gap:4}}>

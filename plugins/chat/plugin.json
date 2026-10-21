@@ -3,5 +3,13 @@
   "title": "Chat",
   "description": "Talk to your routines from the dashboard. Threads go to the Grok Bot inbox webhook; replies come back on the same thread.",
   "enabled": true,
-  "provides": ["page", "settings"]
+  "provides": [
+    "page",
+    "settings"
+  ],
+  "author": "Adam Siwiec",
+  "permissions": {
+    "env": [],
+    "hosts": []
+  }
 }

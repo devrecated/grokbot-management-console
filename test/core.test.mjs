@@ -15,3 +15,9 @@ test("routines, runs, usage and chat use the shared table",async()=>{
 test("wake state",async()=>{ const j=await (await get("/api/box/wake")).json(); assert.ok(["sleeping","waking","awake"].includes(j.state)); });
 test("core tabs only: Bots, Routines, Logs, Box (plus plugin tabs)",async()=>{ const h=await (await get("/bots")).text();
   for(const t of ["/bots","/logs","/box","/p/chat","/p/usage"]) assert.match(h,new RegExp(`href="${t}"`)); assert.doesNotMatch(h,/href="\/usage"/); });
+test("plugin check flags undeclared env, hosts and packages",async()=>{
+  const { spawnSync }=await import("child_process"); const r=spawnSync(process.execPath,["scripts/check-plugins.mjs","test/fixtures/plugins"],{encoding:"utf8"});
+  assert.equal(r.status,1); for(const w of ["DATABASE_URL","collector.example.net","left-pad"]) assert.match(r.stderr,new RegExp(w));
+  assert.equal(spawnSync(process.execPath,["scripts/check-plugins.mjs"]).status,0); });
+test("deploy endpoint explains how to redeploy without a hook",async()=>{ const j=await (await get("/api/deploy")).json(); assert.equal(typeof j.hook,"boolean"); assert.match(j.how,/redeploy|restart/i); });
+test("settings shows plugin authors",async()=>{ const h=await (await get("/settings")).text(); assert.match(h,/GrugBot official plugin - Adam Siwiec/); });

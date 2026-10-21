@@ -8,6 +8,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
+      - run: node scripts/check-plugins.mjs   # flags plugins using env, outside hosts or new packages they did not declare
       - run: npm run build
         env: { DEMO_MODE: "1" }
       - run: npm test

@@ -3,5 +3,13 @@
   "title": "Usage",
   "description": "Cost and usage per bot, then per routine: runs, run minutes, actions, tokens estimated from transcripts, and an estimate from your own rates.",
   "enabled": true,
-  "provides": ["page", "settings"]
+  "provides": [
+    "page",
+    "settings"
+  ],
+  "author": "Adam Siwiec",
+  "permissions": {
+    "env": [],
+    "hosts": []
+  }
 }

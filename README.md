@@ -203,8 +203,17 @@ plugins/<name>/
   test/*.test.mjs   required. node:test file, app is running in demo mode at $BASE.
 ```
 
-- `node plugins/load.mjs` (run by `npm run dev` and `npm run build`) read every `plugin.json` and write `plugins/index.gen.js` and `plugins/config.gen.js`. commit both.
-- Settings page list plugins with on/off. off = no tab, api answer 404, box get nothing from it.
+- `plugin.json` also say `"author"` and `"permissions": {"env": ["KEY"], "hosts": ["api.example.com"]}`: which env vars it read and which outside hosts it call.
+- only plugins that are **on** get built in. `node plugins/load.mjs` (run by `npm run dev` and `npm run build`) pick them:
+  1. `PLUGINS` env (`chat,usage` or `all` or `none`), else
+  2. Settings on/off saved in database (build read it with `DATABASE_URL`), else
+  3. each `plugin.json` `"enabled"`.
+  it write `plugins/index.gen.js`, `config.gen.js` (only built-in plugins) and `catalog.gen.js` (every plugin found). commit them.
+- Settings list every plugin found. tick, then **Save plugins**. each plugin you turn on ask first: who made it (`GrugBot official plugin - Adam Siwiec`, or its author with a **third-party** warning) and "Do you trust this plugin? It runs with full access to your server and database."
+- after save, if build not match, console ask to redeploy. with `VERCEL_DEPLOY_HOOK_URL` set (Vercel: project Settings > Git > Deploy Hooks, store as Secret env var) it POST the hook. without it, it tell you: Vercel Redeploy, or self-hosted `npm run build` then restart.
+- turning off work right away at runtime (tab gone, api 404); it leave the bundle on next build.
+- **install from pin.** get third-party plugin from a commit or tag you read, never a moving branch. `git -C plugins clone <url> <name> && git -C plugins/<name> checkout <sha>`, read it, then build.
+- **plugin check.** `node scripts/check-plugins.mjs` (runs in `npm test` and CI) fail when a plugin read `process.env` it not declare, call `http(s)://` host it not declare, import a package the console not already depend on, or ship own `package.json`. relative `/api/...` calls fine. check is a tripwire, not a sandbox: still read the code.
 - `npm run build && npm test` boot app in demo mode, run core tests and every plugin test. plugin with no test = test fail. CI (`.github/workflows/ci.yml`) do same on push and pull request.
 - `plugins/worker-tasks` is example with API and box tasks. `plugins/usage` is example with page and settings. copy one.
 - chat plugin only own the page and its setting. `POST /api/chat` and `/api/messages` stay core, because Routines buttons and Editor card use same threads and webhook. webhook kinds not change.
@@ -284,7 +293,7 @@ life of a Pause click:
 |---|---|
 | `/bots` | bots and what they been doing |
 | `/` | routines by bot, buttons (and Pause all / Resume all), run history |
-| `/logs` | box logs, filter by source, level, instance, time, text, regex |
+| `/logs` | box logs. Source = bot that own the file, or `system` (exec-daemon.log, journal, kernel...). same line many times in a row (and `previous line repeated N more times`) = one row with ×N. filter by file, level, instance, time, text, regex |
 | `/box` | one row per boot: start, last heartbeat, OS, which bots used box and when, CPU and memory sparklines |
 | `/p/chat` | Grok Bot threads (chat plugin; `/chat` redirect here) |
 | `/p/usage` | runs, run minutes, actions per bot then per routine, plus **estimate** from your own rates (usage plugin; `/usage` redirect here) |

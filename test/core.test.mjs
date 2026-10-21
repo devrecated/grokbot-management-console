@@ -19,5 +19,6 @@ test("plugin check flags undeclared env, hosts and packages",async()=>{
   const { spawnSync }=await import("child_process"); const r=spawnSync(process.execPath,["scripts/check-plugins.mjs","test/fixtures/plugins"],{encoding:"utf8"});
   assert.equal(r.status,1); for(const w of ["DATABASE_URL","collector.example.net","left-pad"]) assert.match(r.stderr,new RegExp(w));
   assert.equal(spawnSync(process.execPath,["scripts/check-plugins.mjs"]).status,0); });
-test("deploy endpoint explains how to redeploy without a hook",async()=>{ const j=await (await get("/api/deploy")).json(); assert.equal(typeof j.hook,"boolean"); assert.match(j.how,/redeploy|restart/i); });
+test("deploy endpoint explains how to redeploy without a hook",async()=>{ const j=await (await get("/api/deploy")).json();
+  assert.equal(j.method,"none"); assert.equal(typeof j.hook,"boolean"); for(const w of ["VERCEL_TOKEN","vercel.com/account/tokens","Environment Variables","System Environment Variables","restart"]) assert.ok(j.how.includes(w),w); });
 test("settings shows plugin authors",async()=>{ const h=await (await get("/settings")).text(); assert.match(h,/GrugBot official plugin - Adam Siwiec/); });

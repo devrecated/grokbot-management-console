@@ -210,7 +210,11 @@ plugins/<name>/
   3. each `plugin.json` `"enabled"`.
   it write `plugins/index.gen.js`, `config.gen.js` (only built-in plugins) and `catalog.gen.js` (every plugin found). commit them.
 - Settings list every plugin found. tick, then **Save plugins**. each plugin you turn on ask first: who made it (`GrugBot official plugin - Adam Siwiec`, or its author with a **third-party** warning) and "Do you trust this plugin? It runs with full access to your server and database."
-- after save, if build not match, console ask to redeploy. with `VERCEL_DEPLOY_HOOK_URL` set (Vercel: project Settings > Git > Deploy Hooks, store as Secret env var) it POST the hook. without it, it tell you: Vercel Redeploy, or self-hosted `npm run build` then restart.
+- after save, if build not match, console ask to redeploy. it use first one set (all Secret env vars, Production):
+  1. `VERCEL_TOKEN`: console call Vercel API, redeploy current production deployment (same source, fresh build, so it read new Settings). work without Git too. make token at vercel.com/account/tokens, scope it to team that own project. needs system env vars `VERCEL_PROJECT_ID` and `VERCEL_DEPLOYMENT_ID`, so keep **Automatically expose System Environment Variables** on (Project Settings > Environment Variables, on by default); `/api/deploy` tell you if they missing. team = `VERCEL_TEAM_ID`, else the one team token see.
+  2. `VERCEL_DEPLOY_HOOK_URL`: POST the hook (only Git-connected projects have hooks: Settings > Git > Deploy Hooks).
+  3. none: console say how. Vercel Redeploy by hand, or self-hosted `npm run build` then restart.
+  new env var only show up after one manual redeploy.
 - turning off work right away at runtime (tab gone, api 404); it leave the bundle on next build.
 - **install from pin.** get third-party plugin from a commit or tag you read, never a moving branch. `git -C plugins clone <url> <name> && git -C plugins/<name> checkout <sha>`, read it, then build.
 - **plugin check.** `node scripts/check-plugins.mjs` (runs in `npm test` and CI) fail when a plugin read `process.env` it not declare, call `http(s)://` host it not declare, import a package the console not already depend on, or ship own `package.json`. relative `/api/...` calls fine. check is a tripwire, not a sandbox: still read the code.

@@ -314,7 +314,8 @@ grug not snoop. box send only this:
 - `ship-config.json` hold allow/deny lists and `catalog` (feed Logs page (i) tooltip).
 - loop run at lowest CPU and IO priority. it wake on faster of ship interval (15 s to 10 min) and heartbeat interval (30 s to 10 min), both default 1 min, both in Settings. box re-read settings at most every 5 min. lines only ship when ship interval due. nothing new = no request, just heartbeat.
 - CPU sample is `/proc/stat` difference since last sample. no extra process, no sleep. only first 8 fields count (guest time already inside user time, old code count it twice on VMs). sample after long gap (loop stopped) is dropped, not shown as one big average.
-- Box page chart is by time, not by sample number. gap in line = box off or loop stopped. faint line = peak per bucket, solid = average. memory shown as % of RAM.
+- Box page: top card = current box (online dot, uptime, OS, grugbox own CPU/memory). then CPU % and memory % charts ([uPlot](https://github.com/leeoniya/uPlot), ~50 kB, the one chart lib here): hover show time + value, time axis in your Settings timezone, 6h/24h/7d/14d. line break only when no heartbeat for over 2x heartbeat interval. Live feed same charts. then small sessions table.
+- session = one boot. Grok Bot box VM often get paused and resumed, not rebooted: same boot id, same session. grugbox spot this (kernel boot time in `/proc/stat` jump forward by time asleep) and Box page show it as "sleeps": breaks inside a session, counted in sessions table.
 - grugbox also report itself: CPU (% of one core, includes the curl it run), peak memory, pass time. Box page show it in "Console agent" column.
 - top bar dot: green under 2 heartbeats since ping, amber until stale threshold (Settings, default 10 min), grey after. click dot for Box page.
 

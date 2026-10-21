@@ -44,6 +44,19 @@ if ! cmp -s "$gb" "$INSTALL_DIR/grugbox"; then cp "$gb" "$INSTALL_DIR/.grugbox.t
 mkdir -p "$INSTALL_DIR/logs"; chmod 700 "$INSTALL_DIR/logs"; rm -f "$INSTALL_DIR/logs/.interval"  # old single-interval cache, now logs/.settings
 find "$INSTALL_DIR/logs" -type f -exec chmod 600 {} + 2>/dev/null || true
 
+# 3. Config: keep existing .env, add any missing keys from the environment.
+ENVF="$INSTALL_DIR/.env"; touch "$ENVF"; chmod 600 "$ENVF"
+missing=()
+for k in ROUTINE_LOG_URL ROUTINE_LOG_TOKEN VERCEL_BYPASS; do
+  if ! grep -q "^$k=." "$ENVF"; then
+    v="${!k:-}"
+    if [ -n "$v" ]; then grep -v "^$k=" "$ENVF" > "$ENVF.tmp" || true; printf '%s=%s\n' "$k" "$v" >> "$ENVF.tmp"; mv "$ENVF.tmp" "$ENVF"; chmod 600 "$ENVF"
+    else missing+=("$k"); fi
+  fi
+done
+if [ "${#missing[@]}" -gt 0 ]; then echo "missing: ${missing[*]}  (set them as env vars or in $ENVF, then run install.sh again)" >&2; exit 3; fi
+
+# (only after .env is complete, so a failed check never leaves the loop stopped)
 # A running loop keeps the old program in memory: stop just that process now (before any state move); step 4 starts the new one.
 restarted=0
 if { [ "$changed" = 1 ] || [ "$gbnew" = 1 ]; } && ! flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null; then
@@ -83,18 +96,6 @@ if "bot_events" in tables:
 p=f"{d}/state.json"; open(p+".tmp","w").write(json.dumps(st)); os.chmod(p+".tmp",0o600); os.replace(p+".tmp",p)
 PY
 fi
-
-# 3. Config: keep existing .env, add any missing keys from the environment.
-ENVF="$INSTALL_DIR/.env"; touch "$ENVF"; chmod 600 "$ENVF"
-missing=()
-for k in ROUTINE_LOG_URL ROUTINE_LOG_TOKEN VERCEL_BYPASS; do
-  if ! grep -q "^$k=." "$ENVF"; then
-    v="${!k:-}"
-    if [ -n "$v" ]; then grep -v "^$k=" "$ENVF" > "$ENVF.tmp" || true; printf '%s=%s\n' "$k" "$v" >> "$ENVF.tmp"; mv "$ENVF.tmp" "$ENVF"; chmod 600 "$ENVF"
-    else missing+=("$k"); fi
-  fi
-done
-if [ "${#missing[@]}" -gt 0 ]; then echo "missing: ${missing[*]}  (set them as env vars or in $ENVF, then run install.sh again)" >&2; exit 3; fi
 
 # 4. Start the loop unless it is already running.
 if flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null; then

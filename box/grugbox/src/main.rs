@@ -363,8 +363,13 @@ fn sample(max_gap: f64) -> Value {
     let m = meminfo(); let tot = m.get("MemTotal").copied().unwrap_or(0) / 1024;
     let load: f64 = read("/proc/loadavg").split_whitespace().next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
     let (ac, rss) = agent_self(t);
+    // VM pause/resume (no reboot): guest uptime stops while paused, wall clock jumps on resume, so btime moves forward
+    // by the time asleep. boot_id stays the same, so it is the same session with a sleep in it.
+    let bt: f64 = read("/proc/stat").lines().find_map(|l| l.strip_prefix("btime ").and_then(|x| x.trim().parse().ok())).unwrap_or(0.0);
+    let bp = logs().join(".btime"); let prev_bt: f64 = read(&bp).trim().parse().unwrap_or(bt); let _ = fs::write(&bp, bt.to_string());
+    let slept = if bt - prev_bt > 30.0 { json!(bt - prev_bt) } else { Value::Null };
     json!({"cpu": pct, "mem_used_mb": tot - m.get("MemAvailable").copied().unwrap_or(0) / 1024, "mem_total_mb": tot, "load1": (load * 100.0).round() / 100.0,
-        "agent_cpu": ac, "agent_rss_mb": rss})
+        "agent_cpu": ac, "agent_rss_mb": rss, "slept_s": slept})
 }
 fn agent_self(t: f64) -> (Value, f64) {
     let st = read("/proc/self/stat"); let f: Vec<f64> = st.rsplit_once(')').map(|(_, r)| r.split_whitespace().filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();

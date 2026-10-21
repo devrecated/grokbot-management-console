@@ -63,3 +63,13 @@ button{background:#1d2330;color:#fff;cursor:pointer}button:disabled{opacity:.5}
 .savenote{position:sticky;bottom:8px;background:#fff;display:inline-block;padding:4px 8px;border-radius:6px;border:1px solid #ddd}
 .spark{vertical-align:middle}.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:13px}
 .tabs-mini a{margin-left:10px;color:#1d2330}.tabs-mini a.on{font-weight:700;text-decoration:none}
+/* Box page */
+.boxsum .sumgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px 18px;margin-top:8px;font-size:14px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#aaa;vertical-align:middle}
+.dot.ok{background:#1e8e3e}.dot.off{background:#aaa}
+.charthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.ranges a{margin-left:8px;font-size:13px;color:#555;text-decoration:none;padding:2px 6px;border-radius:4px}
+.ranges a.on{background:#1f2937;color:#fff}
+.liverow{display:flex;gap:10px;align-items:center;margin-bottom:6px;font-size:13px}
+table.compact td,table.compact th{padding:5px 8px;font-size:13px}
+.uplot .u-title{font-size:13px;font-weight:600;text-align:left}

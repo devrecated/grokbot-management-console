@@ -14,7 +14,7 @@ this folder is template for that bot.
 1. in Grok Bot, make new bot. name it `grug editor` (any name fine). pick a picture of a rock.
 2. paste all of [`bot-instructions.md`](bot-instructions.md) as its instructions.
 3. replace the two placeholders at top of the instructions:
-   - `<REPO_URL>`: your fork, like `https://github.com/OWNER/grokbot-routines`
+   - `<REPO_URL>`: your fork, like `https://github.com/OWNER/grokbot-management-console`
    - `<CHECKOUT_DIR>`: where bot keep its checkout on box, like `/workspace/grugbot-console-src`
 4. give bot what it need, once, with Grok Bot secure secret request (never paste in chat):
    - GitHub access to push to your fork

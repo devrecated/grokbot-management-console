@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/OWNER/grokbot-routines/cli/fakevercel"
+	"github.com/OWNER/grokbot-management-console/cli/fakevercel"
 )
 
 func main() {

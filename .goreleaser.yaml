@@ -34,7 +34,7 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ index .Env \"HOMEBREW_TAP_TOKEN\" }}"
     skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}false{{ else }}true{{ end }}'
-    homepage: https://github.com/OWNER/grokbot-routines
+    homepage: https://github.com/OWNER/grokbot-management-console
     description: Set up the GrugBot Console on Vercel
     license: MIT
     hooks:

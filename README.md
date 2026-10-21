@@ -77,11 +77,11 @@ box is machine where bots run. four steps. do once.
 **1. install box scripts**
 
 ```bash
-git clone https://github.com/OWNER/grokbot-routines.git
+git clone https://github.com/OWNER/grokbot-management-console.git
 mkdir -p /workspace/grugbot-console
 # copy ~/.config/grugbot/box.env (from grugbot init) to /workspace/grugbot-console/.env
 chmod 600 /workspace/grugbot-console/.env
-INSTALL_DIR=/workspace/grugbot-console grokbot-routines/box/install.sh
+INSTALL_DIR=/workspace/grugbot-console grokbot-management-console/box/install.sh
 ```
 
 what this do: copy scripts into `INSTALL_DIR`, start log loop. safe to run again (it is also how you update). setting missing? it print one line like `missing: VERCEL_BYPASS` and exit 3. never print secrets.

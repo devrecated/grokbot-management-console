@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/OWNER/grokbot-routines/cli/fakevercel"
+	"github.com/OWNER/grokbot-management-console/cli/fakevercel"
 )
 
 func TestInitOwnPostgres(t *testing.T) {

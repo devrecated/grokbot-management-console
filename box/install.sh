@@ -6,7 +6,7 @@
 # Never prompts and never prints secret values. Keeps .env, .token, logs/ (state.json offsets + spool), runs.jsonl and registry.jsonl.
 set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/workspace/grugbot-console}"
-REPO_URL="${REPO_URL:-https://github.com/OWNER/grokbot-routines.git}"
+REPO_URL="${REPO_URL:-https://github.com/OWNER/grokbot-management-console.git}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 umask 077
 mkdir -p "$INSTALL_DIR"

@@ -1,4 +1,4 @@
-module github.com/OWNER/grokbot-routines/cli
+module github.com/OWNER/grokbot-management-console/cli
 
 go 1.27.2
 

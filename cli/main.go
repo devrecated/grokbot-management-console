@@ -406,8 +406,8 @@ func handoff(url, team, project, db string) {
 		{"Box secrets", boxEnvPath() + cDim.Render("  (mode 600, not printed)")},
 	}, []string{
 		"copy box secrets to " + cBold.Render("$INSTALL_DIR/.env") + " and chmod 600",
-		"git clone https://github.com/OWNER/grokbot-routines.git",
-		"INSTALL_DIR=/workspace/grugbot-console grokbot-routines/box/install.sh",
+		"git clone https://github.com/OWNER/grokbot-management-console.git",
+		"INSTALL_DIR=/workspace/grugbot-console grokbot-management-console/box/install.sh",
 	})
 	dim("or hand the secrets file to Grok Bot and ask it to install the box scripts")
 	fmt.Println()

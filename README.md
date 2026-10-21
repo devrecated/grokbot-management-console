@@ -107,7 +107,7 @@ or set Vercel env vars `GROKBOT_WEBHOOK_URL` + `GROKBOT_WEBHOOK_KEY` and run `gr
 **4. check it work**
 
 - top bar of console show box with green dot (pinged under 2 minutes ago).
-- send message on `/chat`. note under it say "Delivered to Grok Bot".
+- send message on `/p/chat`. note under it say "Delivered to Grok Bot".
 - `grugbot doctor` say all good.
 
 lazy way: tell your Grok Bot "set up GrugBot Console". it ask for secrets with secure secret request (never in chat) and do step 1.
@@ -188,20 +188,26 @@ grug click button on dashboard, small job run on box. not shell. only jobs box a
 
 plugin = one folder. no framework.
 
+core = Bots, Routines, Logs, Box (and Settings). everything else is plugin: `chat`, `usage`, `worker-tasks`. turn one off and its tab, page, API and settings go away. core keep working.
+
 ```
 plugins/<name>/
   plugin.json   {"name": "<name>", "title": "Tab title", "description": "...", "enabled": true, "provides": ["tasks","page","api"]}
   page.js       optional. server component, gets {q, searchParams, settings}. shows at /p/<name>, gets a tab.
+  config.js     optional. export DEFAULTS {key: default} and RULES {key: v=>ok}. pure, no imports. merged into the one settings row.
+  settings.js   optional. "use client" component, gets {initial, models}. Settings page show it under plugin name while plugin on.
+                save with saveSettings(patch) from @/app/settings/save.
   api.js        optional. export GET/POST/PUT(req, {q, path}) for /api/p/<name>/<path>;
                 ensure(q) make tables; demo(q) seed demo mode; onShip(q, {iid, body}) ride on box ship and return extra reply fields.
   tasks/        optional. tasks.json + scripts, copied to box allowlist by install.sh.
   test/*.test.mjs   required. node:test file, app is running in demo mode at $BASE.
 ```
 
-- `node plugins/load.mjs` (run by `npm run dev` and `npm run build`) read every `plugin.json` and write `plugins/index.gen.js`. commit it.
+- `node plugins/load.mjs` (run by `npm run dev` and `npm run build`) read every `plugin.json` and write `plugins/index.gen.js` and `plugins/config.gen.js`. commit both.
 - Settings page list plugins with on/off. off = no tab, api answer 404, box get nothing from it.
 - `npm run build && npm test` boot app in demo mode, run core tests and every plugin test. plugin with no test = test fail. CI (`.github/workflows/ci.yml`) do same on push and pull request.
-- `plugins/worker-tasks` is example. copy it.
+- `plugins/worker-tasks` is example with API and box tasks. `plugins/usage` is example with page and settings. copy one.
+- chat plugin only own the page and its setting. `POST /api/chat` and `/api/messages` stay core, because Routines buttons and Editor card use same threads and webhook. webhook kinds not change.
 
 ## Tokens (estimated from transcripts)
 
@@ -212,7 +218,7 @@ Grok Bot not tell box how many tokens it use. so grugbox guess, cheap way:
 - bytes to tokens: 3.9 bytes per token. grug measured this against o200k tokenizer on 25 real transcripts (3.92). no tokenizer installed.
 - ship only per-minute totals: bot, model, calls, input, output. no text leave box.
 - prompt caching and hidden tool context not counted. treat as size, not bill.
-- Usage page show tokens per bot and per routine (bot tokens during the run). cost only appear when you type your own price per 1M tokens per model in Settings. no price = no cost. grug not invent prices.
+- Usage page show tokens per bot and per routine (bot tokens during the run). cost only appear when you type your own price per 1M tokens per model in Settings (Usage section). no price = no cost. grug not invent prices.
 - cost: one extra add per line. measured: pass time same within noise (0.08 s for 2 MB of new transcript, with or without).
 
 ## Live
@@ -278,11 +284,12 @@ life of a Pause click:
 |---|---|
 | `/bots` | bots and what they been doing |
 | `/` | routines by bot, buttons (and Pause all / Resume all), run history |
-| `/chat` | Grok Bot threads |
 | `/logs` | box logs, filter by source, level, instance, time, text, regex |
 | `/box` | one row per boot: start, last heartbeat, OS, which bots used box and when, CPU and memory sparklines |
-| `/usage` | runs, run minutes, actions per bot then per routine, plus **estimate** from your own rates |
-| `/settings` | Editor card (ask your editor bot for app changes), chat mirroring, time zone, ship and heartbeat interval, stale-box threshold, log retention, email alerts and templates, cost rates |
+| `/p/chat` | Grok Bot threads (chat plugin; `/chat` redirect here) |
+| `/p/usage` | runs, run minutes, actions per bot then per routine, plus **estimate** from your own rates (usage plugin; `/usage` redirect here) |
+| `/p/worker-tasks` | run allowlisted task on box (worker-tasks plugin) |
+| `/settings` | Editor card (ask your editor bot for app changes), time zone, ship and heartbeat interval, stale-box threshold, log retention, email alerts and templates, plugin on/off, then each on plugin's own settings |
 
 <details>
 <summary>API reference</summary>

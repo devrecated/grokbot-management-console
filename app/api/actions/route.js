@@ -20,7 +20,7 @@ export async function POST(req){
     const text=`Request: send the current prompt of "${r.name}" (${r.routine_id}) to the dashboard.`;
     const [m]=await q`insert into messages(thread_id,role,text,bot,routine_id) values(${thread_id},'user',${text},${r.bot},${r.routine_id}) returning id`;
     const res=await forward(q,{kind:"action",action:"fetch_prompt",routine_id:r.routine_id,bot:r.bot,bot_id:r.bot_id,message_id:String(m.id),thread_id,also_chat:false,text,
-      dashboard_url:`${new URL(req.url).origin}/chat?thread=${encodeURIComponent(thread_id)}`});
+      dashboard_url:`${new URL(req.url).origin}/p/chat?thread=${encodeURIComponent(thread_id)}`});
     await q`update messages set delivered=${res.delivered} where id=${m.id}`;
     return Response.json({ok:true,fetching:true,...res});
   }
@@ -56,7 +56,7 @@ async function all(req,q,b){
   const text=`Request: ${pause?"pause":"resume"} all ${rs.length} ${from} routines: ${rs.map(r=>`"${r.name}" (${r.routine_id}, ${r.bot})`).join(", ")}.`;
   const [m]=await q`insert into messages(thread_id,role,text,also_chat) values(${thread_id},'user',${text},${also}) returning id`;
   const res=await forward(q,{kind:"action",action:b.action,routines:rs.map(r=>({routine_id:r.routine_id,name:r.name,bot:r.bot,bot_id:r.bot_id,current_status:r.status})),
-    message_id:String(m.id),thread_id,also_chat:also,text,dashboard_url:`${new URL(req.url).origin}/chat?thread=${encodeURIComponent(thread_id)}`});
+    message_id:String(m.id),thread_id,also_chat:also,text,dashboard_url:`${new URL(req.url).origin}/p/chat?thread=${encodeURIComponent(thread_id)}`});
   await q`update messages set delivered=${res.delivered} where id=${m.id}`;
   return Response.json({ok:true,count:rs.length,thread_id,...res});
 }

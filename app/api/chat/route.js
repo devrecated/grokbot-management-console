@@ -21,7 +21,7 @@ export async function POST(req){
   if(b.thread_id){ const [f]=await q`select bot,routine_id from messages where thread_id=${tid} order by created_at limit 1`; if(f){bot??=f.bot;rid??=f.routine_id;} }
   const [m]=await q`insert into messages(thread_id,role,text,bot,routine_id,also_chat) values(${tid},'user',${text},${bot},${rid},${also}) returning id`;
   const origin=new URL(req.url).origin;
-  const {delivered,reason}=await forward(q,{...(edit?{kind:"edit_request"}:{}),message_id:String(m.id),thread_id:tid,text,bot,routine_id:rid,also_chat:also,dashboard_url:`${origin}/chat?thread=${encodeURIComponent(tid)}`});
+  const {delivered,reason}=await forward(q,{...(edit?{kind:"edit_request"}:{}),message_id:String(m.id),thread_id:tid,text,bot,routine_id:rid,also_chat:also,dashboard_url:`${origin}/p/chat?thread=${encodeURIComponent(tid)}`});
   await q`update messages set delivered=${delivered} where id=${m.id}`;
   return Response.json({ok:true,message_id:String(m.id),thread_id:tid,delivered,reason});
 }

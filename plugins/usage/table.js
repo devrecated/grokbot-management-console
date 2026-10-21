@@ -1,7 +1,7 @@
 "use client";
 // Usage as a TanStack tree table: one row per bot, its routines underneath. Values arrive formatted from the server.
 import { useMemo } from "react";
-import GrugTable from "../grug-table";
+import GrugTable from "@/app/grug-table";
 export default function UsageTable({rows,rated,anyTok,anyPrice,total,days}){
   const num=(k,h,size=90)=>({id:k,header:h,accessorFn:r=>r[k]?.v??r[k]??0,size,cell:({row})=>{ const x=row.original[k]; const t=x?.t??x; return row.depth?<span>{t}</span>:<b>{t}</b>; }});
   const columns=useMemo(()=>[

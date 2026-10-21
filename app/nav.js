@@ -4,7 +4,7 @@ import Wake from "./wake-button";
 import { sql } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { enabledPlugins } from "@/plugins";
-const TABS=[["bots","Bots","/bots"],["routines","Routines","/"],["logs","Logs","/logs"],["chat","Chat","/chat"],["box","Box","/box"],["usage","Usage","/usage"]];
+const TABS=[["bots","Bots","/bots"],["routines","Routines","/"],["logs","Logs","/logs"],["box","Box","/box"]];
 // Plugin pages (plugins/<name>/page.js) get a tab when the plugin is on.
 export default async function Nav({right,active}){
   let extra=[]; try{ extra=enabledPlugins(await getSettings(sql())).filter(p=>p.Page).map(p=>["p:"+p.name,p.title,"/p/"+p.name]); }catch{}

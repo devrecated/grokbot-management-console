@@ -2,12 +2,11 @@
 // Settings, saved one field at a time (templates on "Save"). Plain controls, no libs.
 import { useState } from "react";
 import { DEFAULT_TEMPLATES, render, templates } from "@/lib/alert-templates";
-import TokenPrices from "./token-prices";
 const TZS=["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Anchorage","Pacific/Honolulu","America/Sao_Paulo","UTC","Europe/London","Europe/Berlin","Europe/Warsaw","Africa/Johannesburg","Asia/Kolkata","Asia/Singapore","Asia/Tokyo","Australia/Sydney"];
 const secs=v=>v<60?`${v} seconds`:v===60?"1 minute":`${v/60} minutes`;
 const Row=({title,children,help})=><label className="srow"><span><b>{title}</b> {children}{help&&<div className="muted">{help}</div>}</span></label>;
 const Sel=({v,opts,on,fmt=x=>x})=><select value={v} onChange={e=>on(isNaN(e.target.value)?e.target.value:Number(e.target.value))}>{opts.map(o=><option key={o} value={o}>{fmt(o)}</option>)}</select>;
-export default function Form({initial,mail,models=[],plugins=[]}){
+export default function Form({initial,mail,plugins=[],pluginSettings={}}){
   const [s,setS]=useState(initial),[note,setNote]=useState(""),[kind,setKind]=useState("fail");
   const [t,setT]=useState(templates(initial)),[test,setTest]=useState("");
   async function save(patch){ setNote("Saving…"); const r=await fetch("/api/settings",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(patch)});
@@ -21,8 +20,6 @@ export default function Form({initial,mail,models=[],plugins=[]}){
     const j=await r.json().catch(()=>({})); setTest(j.sent?"Sent. Check the inbox.":"Not sent: "+(j.reason||r.status)); }
   return <div>
     <div className="bot"><h3>General</h3>
-      <label className="srow"><input type="checkbox" checked={s.always_reply_in_chat} onChange={e=>set("always_reply_in_chat",e.target.checked)}/>
-        <span><b>Always reply in Grok Bot chat</b><div className="muted">Mirror every chat reply and every pause, resume, schedule and trigger result to Grok Bot chat, as well as this dashboard.</div></span></label>
       <Row title="Show times in" help="Every time on the dashboard and in alert emails uses this zone. Schedules still run in the zone the routine was set up in.">
         <Sel v={s.timezone} opts={TZS.includes(s.timezone)?TZS:[s.timezone,...TZS]} on={v=>set("timezone",v)}/></Row></div>
 
@@ -56,16 +53,12 @@ export default function Form({initial,mail,models=[],plugins=[]}){
         <div><div className="muted">Preview · <b>{render(t[p+"_subject"],vars,false)}</b></div>
           <iframe title="preview" sandbox="" srcDoc={render(t[p+"_html"],vars,true)} style={{width:"100%",height:380,border:"1px solid #ddd",borderRadius:6,background:"#fff"}}/></div></div></div>
 
-    <div className="bot"><h3>Cost estimate rates</h3>
-      <div className="muted" style={{marginBottom:8}}>Grok Bot does not report prices or tokens to the box. The Usage page multiplies what it can count by your own rates, and estimates tokens from transcript size. Leave blank or 0 to show usage only.</div>
-      {[["cost_per_run","per run"],["cost_per_run_minute","per run minute"],["cost_per_action","per bot action"]].map(([k,l])=>
-        <Row key={k} title={l}><input type="number" min="0" step="0.0001" defaultValue={s[k]} onBlur={e=>Number(e.target.value)!==s[k]&&set(k,Number(e.target.value)||0)} style={{width:110}}/> {s.currency}</Row>)}
-      <Row title="Currency"><Sel v={s.currency} opts={["USD","EUR","GBP","PLN","CAD","AUD","JPY"]} on={v=>set("currency",v)}/></Row>
-      <TokenPrices value={s.token_prices} models={models} currency={s.currency} onSave={v=>set("token_prices",v)}/></div>
     <div className="bot"><h3>Plugins</h3>
       <div className="muted" style={{marginBottom:8}}>Each folder in <code>plugins/</code> is a plugin. Off = no tab, its API answers 404 and the box gets nothing from it.</div>
       {plugins.map(p=><label key={p.name} className="srow"><input type="checkbox" checked={(s.plugins||{})[p.name]??p.enabled} onChange={e=>set("plugins",{...(s.plugins||{}),[p.name]:e.target.checked})}/>
         <span><b>{p.title}</b> <code>{p.name}</code><div className="muted">{p.description}</div></span></label>)}
-      {!plugins.length&&<div className="muted">No plugins installed.</div>}</div>
+      {!plugins.length&&<div className="muted">No plugins installed.</div>}
+      <div className="muted">A plugin's own settings show below while it is on. Reload after turning one on or off.</div></div>
+    {plugins.filter(p=>pluginSettings[p.name]&&((s.plugins||{})[p.name]??p.enabled)).map(p=><div key={p.name} id={p.name} className="bot"><h3>{p.title} <span className="muted" style={{fontSize:12,fontWeight:400}}>plugin</span></h3>{pluginSettings[p.name]}</div>)}
     {note&&<div className="muted savenote">{note}</div>}</div>;
 }

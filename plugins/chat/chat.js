@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useMemo } from "react";
-import GrugTable from "./grug-table";
+import GrugTable from "@/app/grug-table";
 import { tzLabel } from "@/lib/tz";
 export default function Chat({routines,alwaysChat,tz="America/New_York"}){
   const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:tz,month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})+" "+tzLabel(tz);
@@ -24,7 +24,7 @@ export default function Chat({routines,alwaysChat,tz="America/New_York"}){
     else setNote("Error: "+(j.error||r.status));
   }
   const cur=threads.find(t=>t.thread_id===tid);
-  const pickT=t=>{ setTid(t); if(!t) setMsgs([]); history.replaceState(null,"",t?"/chat?thread="+encodeURIComponent(t):"/chat"); };
+  const pickT=t=>{ setTid(t); if(!t) setMsgs([]); history.replaceState(null,"",t?"/p/chat?thread="+encodeURIComponent(t):"/p/chat"); };
   const tcols=useMemo(()=>[
     {id:"th",header:"Thread",accessorFn:t=>t.thread_id.startsWith("routine:")?(t.routine_id||t.thread_id.slice(8)):t.first_text,size:190,cell:({row:{original:t}})=><><div style={{whiteSpace:"normal"}}>{t.thread_id.startsWith("routine:")?<b>{t.routine_id||t.thread_id.slice(8)}</b>:(t.first_text||"").slice(0,60)}</div><div className="muted" style={{fontSize:11}}>{t.bot||"Any bot"}</div></>},
     {id:"last",header:"Last",accessorFn:t=>+new Date(t.last_at),size:110,cell:({row})=><span className="muted" style={{fontSize:11}}>{fmt(row.original.last_at)}</span>},

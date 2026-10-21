@@ -35,4 +35,4 @@ env way: add `GROKBOT_WEBHOOK_URL` and `GROKBOT_WEBHOOK_KEY` to Vercel project (
 
 ## Check it
 
-send chat message on console `/chat` page. note under box should say "Delivered to Grok Bot". says "webhook not configured"? console not find URL and key. says "webhook 401" or similar? key wrong.
+send chat message on console `/p/chat` page. note under box should say "Delivered to Grok Bot". says "webhook not configured"? console not find URL and key. says "webhook 401" or similar? key wrong.

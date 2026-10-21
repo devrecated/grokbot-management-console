@@ -1,10 +1,3 @@
-import { sql, ensure, ensureMessages } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
-import Nav from "../nav";
-import Chat from "../chat";
-export const dynamic="force-dynamic";
-export default async function ChatPage(){
-  const q=sql(); await ensure(q); await ensureMessages(q);
-  const routines=(await q`select bot, routine_id, name from routines order by name`).map(r=>({bot:r.bot,routine_id:r.routine_id,name:r.name}));
-  return <><Nav active="chat"/><main style={{maxWidth:1400}}><Chat routines={routines} {...(s=>({alwaysChat:s.always_reply_in_chat,tz:s.timezone}))(await getSettings(q))}/></main></>;
-}
+// Chat moved to the chat plugin. Old links (/chat?thread=...) still land there.
+import { redirect } from "next/navigation";
+export default async function R({searchParams}){ redirect("/p/chat"+(s=>s?"?"+s:"")(new URLSearchParams(await searchParams).toString())); }

@@ -20,7 +20,7 @@ export function Controls({r,u,patch}){
     <button disabled={busy} onClick={()=>act(r,{action:paused?"resume":"pause",human:paused?"Resume routine":"Pause routine"},patch)}>{paused?"Resume":"Pause"}</button>{" "}
     <button disabled={busy} className={u.mode==="schedule"?"":"ghost"} onClick={()=>toggle("schedule")}>{event?"Trigger…":"Schedule"}</button>{" "}
     <button disabled={busy} className={u.mode==="prompt"?"":"ghost"} onClick={()=>{ if(!r.prompt_text&&!u.asked) act(r,{action:"fetch_prompt"},patch); toggle("prompt"); }}>Prompt</button>{" "}
-    <a href={`/chat?thread=${encodeURIComponent("routine:"+r.routine_id)}`} style={{fontSize:12}}>chat</a></>}
+    <a href={`/p/chat?thread=${encodeURIComponent("routine:"+r.routine_id)}`} style={{fontSize:12}}>chat</a></>}
     {u.note&&<div className="muted" style={{fontSize:12}}>{u.note}</div>}</div>;
 }
 export function Editor({r,u,patch}){

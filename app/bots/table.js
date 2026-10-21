@@ -28,7 +28,7 @@ export default function BotsTable({data,tz="America/New_York"}){
           <div><div className="tip-h">Description</div><p style={{whiteSpace:"pre-wrap",margin:"4px 0"}}>{r.original.description||"–"}</p>
             {r.original.tools.length>0&&<div className="tools">{r.original.tools.map(t=><span key={t.tool} className="chip">{t.tool} {t.n}</span>)}</div>}</div>
           <div><div className="tip-h">Recent actions</div>{r.original.recent.length?<ul className="recent">{r.original.recent.map((e,i)=><li key={i}><span className="muted">{fmt(e.ts)}</span> {e.tool}{e.target?<> → <b>{e.target}</b></>:null}</li>)}</ul>:<p className="muted">none</p>}</div>
-          <div><div className="tip-h">Routines</div>{r.original.routines.length?<ul className="recent">{r.original.routines.map(x=><li key={x.routine_id}>{x.name} <span className="muted">{x.schedule_or_trigger}</span>{x.status==="paused"&&<span className="badge-paused" style={{marginLeft:4}}>Paused</span>} <a href={`/chat?thread=${encodeURIComponent("routine:"+x.routine_id)}`} onClick={e=>e.stopPropagation()}>chat</a></li>)}</ul>:<p className="muted">none</p>}</div>
+          <div><div className="tip-h">Routines</div>{r.original.routines.length?<ul className="recent">{r.original.routines.map(x=><li key={x.routine_id}>{x.name} <span className="muted">{x.schedule_or_trigger}</span>{x.status==="paused"&&<span className="badge-paused" style={{marginLeft:4}}>Paused</span>} <a href={`/p/chat?thread=${encodeURIComponent("routine:"+x.routine_id)}`} onClick={e=>e.stopPropagation()}>chat</a></li>)}</ul>:<p className="muted">none</p>}</div>
         </div></td></tr>])}
       {!rows.length&&<tr><td colSpan={columns.length} className="muted">No bots match.</td></tr>}</tbody></table></div></>;
 }

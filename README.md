@@ -140,7 +140,8 @@ all box work is one small Rust program, `grugbox` (source in [`box/grugbox`](box
 | `grugbox reply thread_id text` | Grok Bot reply into chat thread |
 | `grugbox confirm routine_id ok\|fail ['{json}'] ['note']` | finish (or reject) pending change |
 | `grugbox prompt routine_id prompt_file` | send routine prompt to console (answer to fetch) |
-| `grugbox logs [-s source] [-l level] [-t 2h] [-g text] [-n 50]` / `grugbox logs sources` | read local log copy |
+| `grugbox logs [-s source] [-l level] [-t 1h\|6h\|24h\|7d] [-g text] [-e regex] [-n 50]` | read logs from console server (box keep no copy) |
+| `grugbox spool` | how many unsent batches wait on disk |
 | `grugbox once` / `grugbox loop` | one pass / forever (loop is what ensure-running start) |
 | `grugbox sample` / `grugbox os` | print one CPU/memory sample / OS facts (what heartbeat send) |
 | `grugbox redact < file` | show what redaction do to some lines |
@@ -152,10 +153,10 @@ build it yourself:
 cd box/grugbox
 cargo build --release                      # target/release/grugbox
 # static, like the committed box/grugbox/grugbox-x86_64-linux:
-RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-unknown-linux-gnu
+rustup target add x86_64-unknown-linux-musl && cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-four crates only: `regex`, `serde_json`, `flate2`, `rusqlite` (bundled SQLite, same `logs/box-logs.db` the old Python used, so swap keep every cursor), plus `sha2`. HTTP go through system `curl`, token in 0600 header file, never on command line. binary about 3.6 MB static.
+four crates only: `regex`, `serde_json`, `flate2`, `sha2`. no SQLite, no C code. HTTP go through system `curl`, token in 0600 header file, never on command line. static musl binary about 1.7 MB.
 
 `.env` keys: `ROUTINE_LOG_URL`, `ROUTINE_LOG_TOKEN`, `VERCEL_BYPASS`. how each bot register its routines: [`box/SETUP.md`](box/SETUP.md).
 
@@ -212,7 +213,7 @@ flowchart LR
   subgraph Box["Bot machine (box)"]
     R[Routines] -->|register.sh / log-run.sh| API
     W[Inbox routine] -->|reply.sh / confirm.sh| API
-    C[grugbox<br/>local SQLite] -->|gzip batch via curl| API
+    C[grugbox<br/>state.json + spool] -->|gzip batch via curl| API
   end
   subgraph Vercel["Vercel (Deployment Protection on)"]
     UI[Dashboard pages] --- API[API routes]
@@ -305,7 +306,9 @@ grug not snoop. box send only this:
 <details>
 <summary>log details</summary>
 
-- `grugbox` read new lines from `/var/log`, `/tmp`, tool caches, files running processes write, kernel log, journal, per-minute network summary, into `logs/box-logs.db` (SQLite). local copy kept 30 days, max 50 MB.
+- `grugbox` read new lines from `/var/log`, `/tmp`, tool caches, files running processes write, kernel log, journal, per-minute network summary, and send them. server (Postgres) is the only log store. box keep no log copy.
+- box keep only `logs/state.json` (where it stopped reading each file, few kB) and `logs/spool/` (batches not sent yet because server down, gzip, max 4 MB, oldest dropped first). spool sent oldest first on next pass.
+- old boxes: `install.sh` move read offsets out of old `logs/box-logs.db` once (and spool anything not shipped yet), so nothing ship twice. old db file stay, grug not delete it.
 - never read: shell histories, `.env` and token files, agent transcript content.
 - redaction catch things that look like token, password, key, JWT, URL with credentials. patterns miss some. check `ship-config.json` before allowing new source.
 - `ship-config.json` hold allow/deny lists and `catalog` (feed Logs page (i) tooltip).

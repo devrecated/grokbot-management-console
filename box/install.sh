@@ -3,7 +3,7 @@
 #   INSTALL_DIR  where the box scripts and state live (default /workspace/grugbot-console)
 #   REPO_URL     git repo to install from (default: this checkout if run from one, else the public repo URL below)
 #   ROUTINE_LOG_URL, ROUTINE_LOG_TOKEN, VERCEL_BYPASS   read from the environment or an existing $INSTALL_DIR/.env
-# Never prompts and never prints secret values. Keeps .env, .token, logs/ (local DB + cursors), runs.jsonl and registry.jsonl.
+# Never prompts and never prints secret values. Keeps .env, .token, logs/ (state.json offsets + spool), runs.jsonl and registry.jsonl.
 set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/workspace/grugbot-console}"
 REPO_URL="${REPO_URL:-https://github.com/OWNER/grokbot-routines.git}"
@@ -44,6 +44,46 @@ if ! cmp -s "$gb" "$INSTALL_DIR/grugbox"; then cp "$gb" "$INSTALL_DIR/.grugbox.t
 mkdir -p "$INSTALL_DIR/logs"; chmod 700 "$INSTALL_DIR/logs"; rm -f "$INSTALL_DIR/logs/.interval"  # old single-interval cache, now logs/.settings
 find "$INSTALL_DIR/logs" -type f -exec chmod 600 {} + 2>/dev/null || true
 
+# A running loop keeps the old program in memory: stop just that process now (before any state move); step 4 starts the new one.
+restarted=0
+if { [ "$changed" = 1 ] || [ "$gbnew" = 1 ]; } && ! flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null; then
+  pid="$(cat "$INSTALL_DIR/logs/.loop.pid" 2>/dev/null || true)"
+  if [ -n "$pid" ] && grep -qa -e collect-logs -e grugbox "/proc/$pid/cmdline" 2>/dev/null; then kill "$pid" 2>/dev/null || true; for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null && break; sleep 0.5; done; fi
+  restarted=1
+fi
+
+# One-time move from the old local SQLite (logs/box-logs.db) to logs/state.json: read offsets and markers carry over,
+# anything not yet shipped goes to the spool. The old db file is kept, never deleted.
+if [ -f "$INSTALL_DIR/logs/box-logs.db" ] && [ ! -f "$INSTALL_DIR/logs/state.json" ] && command -v python3 >/dev/null 2>&1; then
+  python3 - "$INSTALL_DIR/logs" <<'PY' && echo "moved offsets from box-logs.db to state.json (db kept)"
+import sys, os, json, sqlite3, gzip, time, re
+d=sys.argv[1]; db=sqlite3.connect(f"file:{d}/box-logs.db?mode=ro",uri=True)
+q=lambda s,*a: db.execute(s,a).fetchall()
+tables={r[0] for r in q("select name from sqlite_master where type='table'")}
+kv=dict(q("select k,v from kv")) if "kv" in tables else {}
+cur={p:[i,o] for p,i,o in q("select path,inode,offset from cursors")} if "cursors" in tables else {}
+for k in ("os_sent","catalog_sent"):
+    f=os.path.join(d,"."+k)
+    if os.path.exists(f): kv[k]=open(f).read()
+st={"cursors":cur,"kv":{k:v for k,v in kv.items() if not k.startswith(("bot_ship_cursor",))}}
+os.makedirs(f"{d}/spool",exist_ok=True); os.chmod(f"{d}/spool",0o700)
+def spool(kind,body):
+    p=f"{d}/spool/{time.time_ns():020d}-{kind}.json.gz"; open(p,"wb").write(gzip.compress(json.dumps(body).encode())); os.chmod(p,0o600)
+off=time.strftime("%z"); off=off[:3]+":"+off[3:]; UTC=re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:?00)")
+try: last=int(open(f"{d}/.ship_cursor").read() or 0)
+except Exception: last=None
+if last is not None and "logs" in tables:
+    rows=q("select ts,source,level,message from logs where id>? order by id limit 20000",last)
+    for i in range(0,len(rows),5000):
+        spool("logs",{"rows":[{"ts":r[0]+("Z" if UTC.search(r[3][:80]) else off),"source":r[1],"level":r[2],"message":r[3]} for r in rows[i:i+5000]]})
+if "bot_events" in tables:
+    ev=q("select ts,bot,kind,tool,target from bot_events where id>? order by id",int(kv.get("bot_ship_cursor") or 0))
+    tk=q("select minute,bot,model,calls,inp,out from tok") if "tok" in tables else []
+    if ev or tk: spool("bots",{"events":[dict(zip(("ts","bot","kind","tool","target"),e)) for e in ev],"tokens":[dict(zip(("minute","bot","model","calls","input","output"),t)) for t in tk]})
+p=f"{d}/state.json"; open(p+".tmp","w").write(json.dumps(st)); os.chmod(p+".tmp",0o600); os.replace(p+".tmp",p)
+PY
+fi
+
 # 3. Config: keep existing .env, add any missing keys from the environment.
 ENVF="$INSTALL_DIR/.env"; touch "$ENVF"; chmod 600 "$ENVF"
 missing=()
@@ -58,12 +98,9 @@ if [ "${#missing[@]}" -gt 0 ]; then echo "missing: ${missing[*]}  (set them as e
 
 # 4. Start the loop unless it is already running.
 if flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null; then
-  "$INSTALL_DIR/grugbox" ensure-running >/dev/null; echo "installed in $INSTALL_DIR; loop started"
-elif [ "$changed" = 1 ] || [ "$gbnew" = 1 ]; then
-  # a running loop keeps the old program in memory: stop it (only that one process) and start the new one
-  pid="$(cat "$INSTALL_DIR/logs/.loop.pid" 2>/dev/null || true)"
-  if [ -n "$pid" ] && grep -qa -e collect-logs -e grugbox "/proc/$pid/cmdline" 2>/dev/null; then kill "$pid" 2>/dev/null || true; for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null && break; sleep 0.5; done; fi
-  "$INSTALL_DIR/grugbox" ensure-running >/dev/null; echo "installed in $INSTALL_DIR; loop restarted on the new grugbox"
+  "$INSTALL_DIR/grugbox" ensure-running >/dev/null; echo "installed in $INSTALL_DIR; loop $([ "$restarted" = 1 ] && echo restarted on the new grugbox || echo started)"
+elif [ "$restarted" = 1 ]; then
+  echo "installed in $INSTALL_DIR; loop could not be restarted (still locked), run install.sh again" >&2
 else
   echo "up to date in $INSTALL_DIR; loop already running"
 fi

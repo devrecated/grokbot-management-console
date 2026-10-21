@@ -7,13 +7,12 @@
 //   grugbox prompt <routine_id> <file>
 //   grugbox log-run <bot> <routine_id> ok|error|skipped <summary> [seconds]
 //   grugbox register <bot> <bot_id> <routine_id> <name> <schedule_or_trigger> <purpose> [active|paused]
-//   grugbox logs [-s source] [-l level] [-t 2h|1d|date] [-g text] [-n 50] | grugbox logs sources
+//   grugbox logs [-s source] [-l level] [-t 1h|6h|24h|7d] [-g text] [-n 50]   (reads the server, the only log store)
 //   grugbox sample          print one CPU/memory sample (JSON)
 //   grugbox live <until_epoch_s>   stream CPU/memory every 2 s until then (started by the loop when Live is on)
 // Data rules: logs are redacted twice; bot activity is tool names and times only; tokens are byte-count estimates;
 // agent transcripts, shell histories, .env and token files never leave the box. HTTP goes through the system curl.
 use regex::Regex;
-use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -25,8 +24,8 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const MAX_DAYS: i64 = 30;
-const MAX_MB: u64 = 50;
+const SPOOL_MAX: u64 = 4 * 1024 * 1024; // unsent batches kept on disk; oldest dropped past this
+const BATCH: usize = 5000;
 const MAX_LINE: usize = 2000;
 const MAX_NEW_PER_FILE: usize = 20000;
 const BYTES_PER_TOKEN: f64 = 3.9; // raw transcript JSON bytes per o200k token, measured on real transcripts
@@ -140,23 +139,57 @@ fn level(s: &str) -> &'static str {
     if ["fatal", "panic", "crit", "err", "fail"].iter().any(|p| k.starts_with(p)) { "error" } else if k.starts_with("warn") { "warn" } else if k == "debug" || k == "trace" { "debug" } else { "info" }
 }
 
-// ---------- local state (same SQLite file and tables the old Python scripts used, so a swap keeps every cursor) ----------
-fn db() -> Connection {
-    let _ = fs::create_dir_all(logs());
-    let p = logs().join("box-logs.db");
-    let c = Connection::open(&p).expect("open logs/box-logs.db");
-    let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o600));
-    c.busy_timeout(Duration::from_secs(30)).ok();
-    c.execute_batch("create table if not exists logs(id integer primary key, ts text, source text, level text, message text);
-      create index if not exists logs_ts on logs(ts); create index if not exists logs_src on logs(source,ts);
-      create table if not exists cursors(path text primary key, inode integer, offset integer);
-      create table if not exists kv(k text primary key, v text);
-      create table if not exists bot_events(id integer primary key, ts text, bot text, kind text, tool text, target text);
-      create table if not exists tok(minute text, bot text, model text, calls integer, inp integer, out integer, primary key(minute,bot,model));").ok();
-    c
+// ---------- local state: one small JSON file (read offsets + a few markers). The server is the only log store. ----------
+struct St { v: Value }
+impl St {
+    fn load() -> St {
+        let _ = fs::create_dir_all(logs()); let _ = fs::set_permissions(logs(), fs::Permissions::from_mode(0o700));
+        let mut v: Value = serde_json::from_str(&read(logs().join("state.json"))).unwrap_or(json!({}));
+        for k in ["cursors", "kv"] { if !v[k].is_object() { v[k] = json!({}); } }
+        St { v }
+    }
+    fn save(&self) {
+        let p = logs().join("state.json"); let tmp = logs().join(".state.tmp");
+        if fs::write(&tmp, self.v.to_string()).is_ok() { let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600)); let _ = fs::rename(&tmp, &p); }
+    }
+    fn get(&self, k: &str) -> Option<String> { self.v["kv"][k].as_str().map(String::from) }
+    fn set(&mut self, k: &str, val: &str) { self.v["kv"][k] = json!(val); }
+    fn cur(&self, p: &str) -> Option<(u64, u64)> { let c = &self.v["cursors"][p]; Some((c[0].as_u64()?, c[1].as_u64()?)) }
+    fn set_cur(&mut self, p: &str, ino: u64, off: u64) { self.v["cursors"][p] = json!([ino, off]); }
 }
-fn kv_get(c: &Connection, k: &str) -> Option<String> { c.query_row("select v from kv where k=?", [k], |r| r.get(0)).optional().ok().flatten() }
-fn kv_set(c: &Connection, k: &str, v: &str) { let _ = c.execute("insert or replace into kv values(?,?)", params![k, v]); }
+type Row = (String, String, String, String); // ts, source, level, message
+
+// ---------- spool: unsent batches as small gzip files, sent oldest first, capped ----------
+fn spool_dir() -> PathBuf { logs().join("spool") }
+fn spool_put(kind: &str, body: &[u8]) {
+    let d = spool_dir(); let _ = fs::create_dir_all(&d);
+    let n = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let p = d.join(format!("{:020}-{}.json.gz", n, kind));
+    let _ = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&p).and_then(|mut f| f.write_all(body));
+    let mut files = spool_files(); let mut total: u64 = files.iter().map(|f| f.1).sum();
+    while total > SPOOL_MAX && files.len() > 1 { let (p, sz) = files.remove(0); let _ = fs::remove_file(&p); total -= sz; eprintln!("spool full: dropped oldest batch"); }
+}
+fn spool_files() -> Vec<(PathBuf, u64)> {
+    let mut v: Vec<(PathBuf, u64)> = fs::read_dir(spool_dir()).map(|rd| rd.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".json.gz")).map(|e| (e.path(), e.metadata().map(|m| m.len()).unwrap_or(0))).collect()).unwrap_or_default();
+    v.sort(); v
+}
+// Send spooled batches oldest first; stop at the first failure (server down = try next pass).
+fn spool_flush() -> bool {
+    for (p, _) in spool_files() {
+        let kind = if p.to_string_lossy().ends_with("-bots.json.gz") { "/api/bots" } else { "/api/logs" };
+        let Ok(b) = fs::read(&p) else { continue };
+        match http("POST", kind, &b, true) { Ok(_) => { let _ = fs::remove_file(&p); } Err(_) => return false }
+    }
+    true
+}
+// POST now, or spool it if the server is unreachable. Ok(reply) only when sent.
+fn send(kind: &str, body: &Value, spool_ok: bool) -> Option<String> {
+    let path = format!("/api/{}", kind); let gzb = gz(body);
+    match http("POST", &path, &gzb, true) {
+        Ok((_, r)) => Some(r),
+        Err(e) => { if spool_ok { spool_put(kind, &gzb); eprintln!("{} send failed ({}), spooled", kind, e); } else { eprintln!("{} send failed ({})", kind, e); } None }
+    }
+}
 
 // ---------- collect ----------
 fn skip_dir() -> &'static Regex {
@@ -184,8 +217,8 @@ fn is_text(p: &str) -> bool {
     let mut b = [0u8; 4096];
     fs::File::open(p).and_then(|mut f| f.read(&mut b)).map(|n| !b[..n].contains(&0)).unwrap_or(false)
 }
-fn collect(c: &Connection) -> usize {
-    let t = now(); let nowl = local(t); let mut total = 0;
+fn collect(st: &mut St) -> Vec<Row> {
+    let t = now(); let nowl = local(t); let mut all: Vec<Row> = Vec::new();
     let home = std::env::var("HOME").unwrap_or_default(); let d = dir();
     let mut files = HashSet::new();
     walk(Path::new("/var/log"), &|_| true, &mut files, 0);
@@ -206,12 +239,12 @@ fn collect(c: &Connection) -> usize {
     files.sort();
     let nfiles = files.len();
     for f in &files {
-        let Ok(st) = fs::metadata(f) else { continue };
-        let row: Option<(i64, i64)> = c.query_row("select inode,offset from cursors where path=?", [f], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
-        let size = st.len() as i64; let ino = st.ino() as i64;
+        let stc = &mut *st; let Ok(md) = fs::metadata(f) else { continue };
+        let row = stc.cur(f).map(|(a, b)| (a as i64, b as i64));
+        let size = md.len() as i64; let ino = md.ino() as i64;
         let mut off = match row { Some((i, o)) if i == ino && o <= size => o, _ => 0 };
         if off == size { continue; }
-        if off == 0 && !is_text(f) { let _ = c.execute("insert or replace into cursors values(?,?,?)", params![f, ino, size]); continue; }
+        if off == 0 && !is_text(f) { stc.set_cur(f, ino as u64, size as u64); continue; }
         let mut src = f.strip_prefix("/tmp/").or_else(|| f.strip_prefix("/var/log/")).map(|s| s.to_string()).unwrap_or_else(|| f.replacen(&(home.clone() + "/"), "~/", 1));
         if src.starts_with('/') { src = f.rsplit('/').next().unwrap_or(f).to_string(); }
         let Ok(fh) = fs::File::open(f) else { continue };
@@ -240,51 +273,43 @@ fn collect(c: &Connection) -> usize {
             if rows.len() >= MAX_NEW_PER_FILE { break; }
         }
         if rep > 0 { rows.push((nowl.clone(), "info".into(), format!("(previous line repeated {} more times)", rep))); }
-        let tx = c.unchecked_transaction().unwrap();
-        for (ts, lv, m) in &rows { let _ = tx.execute("insert into logs(ts,source,level,message) values(?,?,?,?)", params![ts, src, lv, m]); }
-        let _ = tx.execute("insert or replace into cursors values(?,?,?)", params![f, ino, off]);
-        let _ = tx.commit(); total += rows.len();
+        for (ts, lv, m) in rows { all.push((ts, src.clone(), lv, m)); }
+        stc.set_cur(f, ino as u64, off as u64);
     }
-    total += collect_dmesg(c) + collect_journal(c, &nowl) + collect_network(c, &nowl);
-    let _ = c.execute("delete from logs where ts<?", [local(t - (MAX_DAYS * 86400) as f64)]);
-    let p = logs().join("box-logs.db");
-    while fs::metadata(&p).map(|m| m.len()).unwrap_or(0) > MAX_MB * 1024 * 1024 {
-        let n: i64 = c.query_row("select count(*) from logs", [], |r| r.get(0)).unwrap_or(0);
-        if n < 1000 { break; }
-        let _ = c.execute("delete from logs where id in (select id from logs order by id limit ?)", [n / 5]); let _ = c.execute_batch("vacuum");
-    }
-    println!("collected {} new lines from {} files; db {} KB", total, nfiles, fs::metadata(&p).map(|m| m.len() / 1024).unwrap_or(0));
-    total
+    collect_dmesg(st, &mut all); collect_journal(st, &nowl, &mut all); collect_network(st, &nowl, &mut all);
+    // forget cursors of files that are gone, so state.json stays small
+    let keep: HashSet<&String> = files.iter().collect();
+    if let Some(m) = st.v["cursors"].as_object_mut() { m.retain(|k, _| keep.contains(k)); }
+    println!("collected {} new lines from {} files", all.len(), nfiles);
+    all
 }
-fn collect_dmesg(c: &Connection) -> usize {
-    let out = run("dmesg", &["--time-format", "iso", "--nopager"]);
-    let last = kv_get(c, "dmesg_last").unwrap_or_default();
+fn collect_dmesg(c: &mut St, out: &mut Vec<Row>) {
+    let dm = run("dmesg", &["--time-format", "iso", "--nopager"]);
+    let last = c.get("dmesg_last").unwrap_or_default();
     let k = |l: &str| l.get(..31.min(l.len())).unwrap_or(l).to_string();
-    let new: Vec<&str> = out.lines().filter(|l| last.is_empty() || k(l) > last).collect();
-    if new.is_empty() { return 0; }
-    for l in &new { let _ = c.execute("insert into logs(ts,source,level,message) values(?,?,?,?)", params![l.get(..19).unwrap_or(""), "kernel (dmesg)", level(l), trunc(&redact(l), MAX_LINE)]); }
-    kv_set(c, "dmesg_last", &k(new[new.len() - 1])); new.len()
+    let new: Vec<&str> = dm.lines().filter(|l| last.is_empty() || k(l) > last).collect();
+    if new.is_empty() { return; }
+    for l in &new { out.push((l.get(..19).unwrap_or("").to_string(), "kernel (dmesg)".into(), level(l).into(), trunc(&redact(l), MAX_LINE))); }
+    c.set("dmesg_last", &k(new[new.len() - 1]));
 }
-fn collect_journal(c: &Connection, nowl: &str) -> usize {
-    let cur = kv_get(c, "journal_cursor");
+fn collect_journal(c: &mut St, nowl: &str, out: &mut Vec<Row>) {
+    let cur = c.get("journal_cursor");
     let mut a = vec!["--no-pager", "-o", "short-iso", "--show-cursor", "-q"];
     let cs; if let Some(x) = &cur { cs = x.clone(); a.extend(["--after-cursor", &cs]); } else { a.extend(["-n", "2000"]); }
-    let mut n = 0;
     for l in run("journalctl", &a).lines() {
-        if let Some(x) = l.strip_prefix("-- cursor: ") { kv_set(c, "journal_cursor", x); continue; }
+        if let Some(x) = l.strip_prefix("-- cursor: ") { c.set("journal_cursor", x); continue; }
         let head = l.get(..19).unwrap_or("");
         let ts = if red().ts.is_match(head) { head.to_string() } else { nowl.to_string() };
-        let _ = c.execute("insert into logs(ts,source,level,message) values(?,?,?,?)", params![ts, "journal", level(l), trunc(&redact(l), MAX_LINE)]); n += 1;
+        out.push((ts, "journal".into(), level(l).into(), trunc(&redact(l), MAX_LINE)));
     }
-    n
 }
-fn collect_network(c: &Connection, nowl: &str) -> usize {
+fn collect_network(c: &mut St, nowl: &str, out: &mut Vec<Row>) {
     let mut cur: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for l in read("/proc/net/dev").lines().skip(2) {
         if let Some((n, d)) = l.split_once(':') { let f: Vec<u64> = d.split_whitespace().filter_map(|x| x.parse().ok()).collect(); if f.len() > 8 { cur.insert(n.trim().into(), (f[0], f[8])); } }
     }
-    let prev: Value = kv_get(c, "netdev").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
-    kv_set(c, "netdev", &json!(cur.iter().map(|(k, v)| (k.clone(), json!([v.0, v.1]))).collect::<serde_json::Map<_, _>>()).to_string());
+    let prev: Value = c.get("netdev").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+    c.set("netdev", &json!(cur.iter().map(|(k, v)| (k.clone(), json!([v.0, v.1]))).collect::<serde_json::Map<_, _>>()).to_string());
     let hb = |b: u64| if b >= 1_000_000 { format!("{:.1}MB", b as f64 / 1e6) } else { format!("{:.0}kB", b as f64 / 1e3) };
     let parts: Vec<String> = cur.iter().filter(|(n, _)| *n != "lo" && prev.get(n.as_str()).is_some()).map(|(n, v)| {
         let p = &prev[n.as_str()]; format!("{} rx {} tx {}", n, hb(v.0.saturating_sub(p[0].as_u64().unwrap_or(0))), hb(v.1.saturating_sub(p[1].as_u64().unwrap_or(0))))
@@ -299,7 +324,7 @@ fn collect_network(c: &Connection, nowl: &str) -> usize {
     let top = pv.iter().take(5).map(|(k, v)| format!("{} x{}", k, v)).collect::<Vec<_>>().join(", ");
     let msg = format!("net/min: {} | sockets {}{}", if parts.is_empty() { "baseline".into() } else { parts.join("; ") },
         states.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join(" "), if top.is_empty() { String::new() } else { format!(" | top peers {}", top) });
-    let _ = c.execute("insert into logs(ts,source,level,message) values(?,?,?,?)", params![nowl, "network (summary)", "info", msg]); 1
+    out.push((nowl.to_string(), "network (summary)".into(), "info".into(), msg));
 }
 
 // ---------- box facts ----------
@@ -374,80 +399,72 @@ fn glob_match(p: &str, s: &str) -> bool {
     m(&p, &s)
 }
 fn due(p: &Path, secs: u64) -> bool { fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).map_or(true, |e| e.as_secs() + 3 >= secs) }
-fn ship(c: &Connection, pass_ms: u64) {
+// Collect + send when the ship interval is due; heartbeat (with a CPU/memory sample) when that is due. Unsent = spool.
+fn ship(st: &mut St, pass_ms: u64) {
     let cfg: Value = serde_json::from_str(&read(dir().join("ship-config.json"))).unwrap_or(json!({"allow":["*"],"deny":[]}));
     let arr = |k: &str| cfg[k].as_array().cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>();
     let (allow, deny_) = (arr("allow"), arr("deny"));
     let ok = |s: &str| allow.iter().any(|p| glob_match(p, s)) && !deny_.iter().any(|p| glob_match(p, s));
-    let curp = logs().join(".ship_cursor");
-    let mut last: Option<i64> = read(&curp).trim().parse().ok();
-    let top: i64 = c.query_row("select coalesce(max(id),0) from logs", [], |r| r.get(0)).unwrap_or(0);
-    if last.is_none() { // first run: backfill only the last 24h
-        let m: Option<i64> = c.query_row("select min(id) from logs where ts>=?", [local(now() - 86400.0)], |r| r.get(0)).unwrap_or(None);
-        last = Some(m.unwrap_or(top + 1) - 1);
-    }
-    let last = last.unwrap();
-    let max_batch = cfg["max_batch"].as_i64().unwrap_or(2000);
-    let mut st = c.prepare("select id,ts,source,level,message from logs where id>? order by id limit ?").unwrap();
-    let mut rows: Vec<(i64, String, String, String, String)> = st.query_map(params![last, max_batch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap().flatten().collect();
-    let cat = serde_json::to_string(&cfg["catalog"]).unwrap_or_default(); let cat_sent = logs().join(".catalog_sent");
-    let send_cat = read(&cat_sent) != cat;
+    let cat = serde_json::to_string(&cfg["catalog"]).unwrap_or_default(); let send_cat = st.get("catalog_sent").as_deref() != Some(cat.as_str());
     let (ship_s, hb_s) = settings();
-    let hb = logs().join(".heartbeat"); let stale = due(&hb, hb_s); let shp = logs().join(".shipped");
-    if !due(&shp, ship_s) { rows.clear(); }
-    if rows.is_empty() && !send_cat && !stale { if !curp.exists() { let _ = fs::write(&curp, last.to_string()); } return; }
+    let hb = logs().join(".heartbeat"); let stale = due(&hb, hb_s); let shp = logs().join(".shipped"); let ship_due = due(&shp, ship_s);
+    let flushed = spool_flush();
+    let rows = if ship_due { collect(st) } else { Vec::new() };
+    if rows.is_empty() && !send_cat && !stale { return; }
     let off = off_str();
-    let batch: Vec<Value> = rows.iter().filter(|r| ok(&r.2)).map(|r| {
-        let head: String = r.4.chars().take(80).collect();
-        json!({"ts": format!("{}{}", r.1, if red().utc.is_match(&head) { "Z".to_string() } else { off.clone() }), "source": r.2, "level": r.3, "message": redact(&r.4)})
+    let batch: Vec<Value> = rows.iter().filter(|r| ok(&r.1)).map(|r| {
+        let head: String = r.3.chars().take(80).collect();
+        json!({"ts": format!("{}{}", r.0, if red().utc.is_match(&head) { "Z".to_string() } else { off.clone() }), "source": r.1, "level": r.2, "message": redact(&r.3)})
     }).collect();
     let mut inst = instance(); let iid = inst["instance_id"].as_str().unwrap_or("").to_string();
     if stale { let mut s = sample(900.0); s["agent_pass_ms"] = json!(pass_ms); inst["sample"] = s; }
-    let osf = logs().join(".os_sent"); let send_os = read(&osf) != iid;
+    let send_os = st.get("os_sent").as_deref() != Some(iid.as_str());
     if send_os { inst["os"] = os_info(); }
-    let mut body = json!({"instance": inst, "rows": batch});
-    if send_cat { body["catalog"] = cfg["catalog"].clone(); }
-    match http("POST", "/api/logs", &gz(&body), true) {
-        Ok((_, res)) => {
-            if stale { let _ = fs::write(&hb, ""); }
-            if !rows.is_empty() { let _ = fs::write(&shp, ""); let _ = fs::write(&curp, rows.last().unwrap().0.to_string()); }
-            if send_os { let _ = fs::write(&osf, &iid); }
-            if send_cat { let _ = fs::write(&cat_sent, &cat); }
-            let lu = serde_json::from_str::<Value>(&res).ok().and_then(|v| v["live_until"].as_f64()).unwrap_or(0.0);
-            if lu / 1000.0 > now() { start_live((lu / 1000.0) as u64); }
-            println!("shipped {} of {} new lines", batch.len(), rows.len());
+    let chunks: Vec<&[Value]> = if batch.is_empty() { vec![&[][..]] } else { batch.chunks(BATCH).collect() };
+    let mut sent = 0;
+    for (n, ch) in chunks.iter().enumerate() {
+        let mut body = json!({"instance": if n == 0 { inst.clone() } else { instance() }, "rows": ch});
+        if n == 0 && send_cat { body["catalog"] = cfg["catalog"].clone(); }
+        // spool only if earlier batches went out (keeps order) or nothing is waiting; never spool a bare heartbeat
+        match if flushed { send("logs", &body, !ch.is_empty()) } else { if !ch.is_empty() { body["instance"].as_object_mut().map(|o| o.remove("sample")); spool_put("logs", &gz(&body)); } None } {
+            Some(res) => {
+                sent += ch.len();
+                if n == 0 {
+                    if send_os { st.set("os_sent", &iid); } if send_cat { st.set("catalog_sent", &cat); }
+                    let lu = serde_json::from_str::<Value>(&res).ok().and_then(|v| v["live_until"].as_f64()).unwrap_or(0.0);
+                    if lu / 1000.0 > now() { start_live((lu / 1000.0) as u64); }
+                }
+            }
+            None => {}
         }
-        Err(e) => eprintln!("ship failed: {}", e),
     }
+    if stale { let _ = fs::write(&hb, ""); }
+    if ship_due { let _ = fs::write(&shp, ""); }
+    println!("shipped {} of {} new lines{}", sent, rows.len(), if sent < batch.len() { " (rest spooled)" } else { "" });
 }
 
 // ---------- bot activity + token estimates ----------
 fn h12(s: &str) -> String { sha_hex(&format!("bot:{}", s))[..12].to_string() }
-fn agent_base(c: &Connection, root: &str, aid: &str, t: f64) -> (u64, String) {
-    // (system prompt bytes, model) for one bot, cached 1 h. Reads only a length and the model name, never content.
+fn agent_base(c: &mut St, root: &str, aid: &str, t: f64) -> (u64, String) {
+    // (system prompt bytes, model) for one bot, cached 1 h. Prompt size is not readable without SQLite and is tiny next to
+    // the conversation (0-6 kB measured), so it counts as 0. The model name is found by scanning the tail of the blob file.
     let k = format!("base:{}", aid);
-    if let Some(v) = kv_get(c, &k) { let p: Vec<&str> = v.splitn(3, '|').collect(); if p.len() == 3 && t - p[0].parse::<f64>().unwrap_or(0.0) < 3600.0 { return (p[1].parse().unwrap_or(0), p[2].to_string()); } }
-    let d = format!("{}/agents/{}", root, aid); let (mut b, mut m) = (0u64, "unknown".to_string());
-    let ro = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI;
-    if let Ok(s) = Connection::open_with_flags(format!("file:{}/store.db?mode=ro", d), ro) {
-        s.busy_timeout(Duration::from_secs(2)).ok();
-        b = s.query_row("select coalesce(sum(length(value)),0) from kv where key in ('promptPrefixSnapshot','agentProfilePromptSnapshot')", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64;
+    if let Some(v) = c.get(&k) { let p: Vec<&str> = v.splitn(3, '|').collect(); if p.len() == 3 && t - p[0].parse::<f64>().unwrap_or(0.0) < 3600.0 { return (p[1].parse().unwrap_or(0), p[2].to_string()); } }
+    let (b, mut m) = (0u64, "unknown".to_string());
+    if let Ok(mut f) = fs::File::open(format!("{}/agents/{}/conversation-blobs.db", root, aid)) {
+        let len = f.metadata().map(|m| m.len()).unwrap_or(0); let _ = f.seek(SeekFrom::Start(len.saturating_sub(4 << 20)));
+        let mut buf = Vec::new(); let _ = f.read_to_end(&mut buf);
+        let re = regex::bytes::Regex::new(r#""modelName"\s*:\s*"([\w.\-]{1,60})""#).unwrap();
+        if let Some(x) = re.captures_iter(&buf).last() { m = String::from_utf8_lossy(&x[1]).into_owned(); }
     }
-    if let Ok(s) = Connection::open_with_flags(format!("file:{}/conversation-blobs.db?mode=ro", d), ro) {
-        s.busy_timeout(Duration::from_secs(2)).ok();
-        let re = Regex::new(r#""modelName"\s*:\s*"([\w.\-]{1,60})""#).unwrap();
-        if let Ok(mut q) = s.prepare("select data from blobs order by rowid desc limit 30") {
-            let it = q.query_map([], |r| { let v: rusqlite::types::Value = r.get(0)?; Ok(match v { rusqlite::types::Value::Blob(b) => String::from_utf8_lossy(&b).into_owned(), rusqlite::types::Value::Text(t) => t, _ => String::new() }) });
-            if let Ok(it) = it { for v in it.flatten() { if let Some(x) = re.captures_iter(&v).last() { m = x[1].to_string(); break; } } }
-        }
-    }
-    kv_set(c, &k, &format!("{}|{}|{}", t, b, m)); (b, m)
+    c.set(&k, &format!("{}|{}|{}", t, b, m)); (b, m)
 }
-fn bot_sync(c: &Connection) {
+fn bot_sync(c: &mut St) {
     let root = std::env::var("AGENT_DATA").unwrap_or("/home/box/agent-data".into());
     let ctx_cap = std::env::var("GRUGBOT_CTX_TOKENS").ok().and_then(|x| x.parse().ok()).unwrap_or(200000u64) as f64 * BYTES_PER_TOKEN;
     let mut bots: BTreeMap<String, Value> = BTreeMap::new(); let mut names: HashMap<String, String> = HashMap::new();
     let t = now(); let mut new: Vec<(String, String, String, String, Option<String>)> = Vec::new();
+    let mut toks: BTreeMap<(String, String, String), (i64, i64, i64)> = BTreeMap::new();
     let agents: Vec<String> = fs::read_dir(format!("{}/agents", root)).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
     for aid in &agents {
         let Ok(d) = serde_json::from_str::<Value>(&read(format!("{}/agents/{}/profile.json", root, aid))) else { continue };
@@ -456,13 +473,13 @@ fn bot_sync(c: &Connection) {
         bots.insert(k.clone(), json!({"key": k, "name": s("name", 80), "title": s("title", 120), "description": s("description", 400), "color": s("avatarColor", 20)}));
         names.insert(aid.clone(), s("name", 80));
     }
-    let tail = |c: &Connection, key: &str, p: &str, f: &mut dyn FnMut(&[u8])| -> Option<Option<String>> {
-        let size = fs::metadata(p).ok()?.len(); let prev = kv_get(c, key); let mut off: u64 = prev.as_deref().and_then(|x| x.parse().ok()).unwrap_or(0);
+    let tail = |c: &mut St, key: &str, p: &str, f: &mut dyn FnMut(&[u8])| -> Option<Option<String>> {
+        let size = fs::metadata(p).ok()?.len(); let prev = c.get(key); let mut off: u64 = prev.as_deref().and_then(|x| x.parse().ok()).unwrap_or(0);
         if off > size { off = 0; } if off == size { return None; }
         let mut r = BufReader::new(fs::File::open(p).ok()?); r.seek(SeekFrom::Start(off)).ok()?;
         let mut raw = Vec::new();
         loop { raw.clear(); match r.read_until(b'\n', &mut raw) { Ok(0) | Err(_) => break, _ => {} } if !raw.ends_with(b"\n") { break; } off += raw.len() as u64; f(&raw); }
-        kv_set(c, key, &off.to_string()); Some(prev)
+        c.set(key, &off.to_string()); Some(prev)
     };
     for aid in &agents { // audit.jsonl: type + ts only
         let p = format!("{}/agents/{}/audit.jsonl", root, aid); let b = h12(aid);
@@ -478,11 +495,11 @@ fn bot_sync(c: &Connection) {
         let Ok(rd) = fs::read_dir(&td) else { continue };
         for f in rd.flatten() {
             let p = f.path().to_string_lossy().into_owned(); if !p.ends_with(".jsonl") { continue; }
-            let key = format!("tx:{}", p); let had = kv_get(c, &key).is_some();
+            let key = format!("tx:{}", p); let had = c.get(&key).is_some();
             let mt = fs::metadata(&p).and_then(|m| m.modified()).ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs_f64()).unwrap_or(t);
             let ts = utc(if had { t } else { mt });
             let known = names.contains_key(&tid); let bot = if known { h12(&tid) } else { "subagents".into() };
-            let mut cum: u64 = if had { kv_get(c, &format!("cum:{}", p)).and_then(|x| x.parse().ok()).unwrap_or(0) } else { 0 };
+            let mut cum: u64 = if had { c.get(&format!("cum:{}", p)).and_then(|x| x.parse().ok()).unwrap_or(0) } else { 0 };
             let base = if known { agent_base(c, &root, &tid, t) } else { (0, "unknown".into()) };
             let (mut calls, mut inp, mut out) = (0u64, 0f64, 0f64);
             let names_ref = &names;
@@ -499,36 +516,25 @@ fn bot_sync(c: &Connection) {
                 cum += raw.len() as u64;
             });
             if r.is_none() { continue; }
-            kv_set(c, &format!("cum:{}", p), &cum.to_string());
+            c.set(&format!("cum:{}", p), &cum.to_string());
             if had && calls > 0 { // no backfill: history before the first read has no real times
-                let _ = c.execute("insert into tok values(?,?,?,?,?,?) on conflict(minute,bot,model) do update set calls=calls+excluded.calls, inp=inp+excluded.inp, out=out+excluded.out",
-                    params![format!("{}:00Z", &ts[..16]), bot, base.1, calls, (inp / BYTES_PER_TOKEN).round() as i64, (out / BYTES_PER_TOKEN).round() as i64]);
+                let t = toks.entry((format!("{}:00Z", &ts[..16]), bot.clone(), base.1.clone())).or_insert((0, 0, 0));
+                t.0 += calls as i64; t.1 += (inp / BYTES_PER_TOKEN).round() as i64; t.2 += (out / BYTES_PER_TOKEN).round() as i64;
             }
         }
     }
-    for e in &new { let _ = c.execute("insert into bot_events(ts,bot,kind,tool,target) values(?,?,?,?,?)", params![e.0, e.1, e.2, e.3, e.4]); }
-    let _ = c.execute("delete from bot_events where ts < ?", [utc(t - 7.0 * 86400.0)]);
+    // forget offsets of transcripts/audit files that are gone
+    if let Some(m) = c.v["kv"].as_object_mut() { m.retain(|k, _| !(k.starts_with("tx:") || k.starts_with("cum:")) || Path::new(k.splitn(2, ':').nth(1).unwrap_or("")).exists()); }
     bots.insert("subagents".into(), json!({"key":"subagents","name":"Subagents","title":"Short-lived helpers","description":"Work done by subagents and one-off sessions that have no bot profile.","color":""}));
     let bjson = Value::Array(bots.values().cloned().collect()).to_string(); let bhash = sha_hex(&bjson);
-    let send_bots = kv_get(c, "bots_sent").as_deref() != Some(&bhash);
-    let cur: i64 = kv_get(c, "bot_ship_cursor").and_then(|x| x.parse().ok()).unwrap_or(0);
-    let mut q = c.prepare("select id,ts,bot,kind,tool,target from bot_events where id>? order by id limit 5000").unwrap();
-    let rows: Vec<(i64, Value)> = q.query_map([cur], |r| Ok((r.get(0)?, json!({"ts": r.get::<_, String>(1)?, "bot": r.get::<_, String>(2)?, "kind": r.get::<_, String>(3)?, "tool": r.get::<_, String>(4)?, "target": r.get::<_, Option<String>>(5)?})))).unwrap().flatten().collect();
-    let mut q2 = c.prepare("select minute,bot,model,calls,inp,out from tok order by minute limit 2000").unwrap();
-    let toks: Vec<(String, String, String, i64, i64, i64)> = q2.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))).unwrap().flatten().collect();
-    if rows.is_empty() && !send_bots && toks.is_empty() { return; }
-    let mut body = json!({"instance": instance(), "events": rows.iter().map(|r| r.1.clone()).collect::<Vec<_>>()});
+    let send_bots = c.get("bots_sent").as_deref() != Some(bhash.as_str());
+    if new.is_empty() && !send_bots && toks.is_empty() { return; }
+    let mut body = json!({"instance": instance(), "events": new.iter().map(|e| json!({"ts": e.0, "bot": e.1, "kind": e.2, "tool": e.3, "target": e.4})).collect::<Vec<_>>()});
     if send_bots { body["bots"] = serde_json::from_str(&bjson).unwrap(); }
-    if !toks.is_empty() { body["tokens"] = toks.iter().map(|t| json!({"minute": t.0, "bot": t.1, "model": t.2, "calls": t.3, "input": t.4, "output": t.5})).collect(); }
-    match http("POST", "/api/bots", &gz(&body), true) {
-        Ok(_) => {
-            if let Some(l) = rows.last() { kv_set(c, "bot_ship_cursor", &l.0.to_string()); }
-            for t in &toks { let _ = c.execute("delete from tok where minute=? and bot=? and model=? and calls=?", params![t.0, t.1, t.2, t.3]); }
-            if send_bots { kv_set(c, "bots_sent", &bhash); }
-            println!("bots: {} profiles{}, {} events, {} token rows shipped", bots.len(), if send_bots { " (sent)" } else { "" }, rows.len(), toks.len());
-        }
-        Err(e) => eprintln!("bot sync failed: {}", e),
-    }
+    if !toks.is_empty() { body["tokens"] = toks.iter().map(|(k, v)| json!({"minute": k.0, "bot": k.1, "model": k.2, "calls": v.0, "input": v.1, "output": v.2})).collect(); }
+    let sent = send("bots", &body, !new.is_empty() || !toks.is_empty()).is_some();
+    if sent && send_bots { c.set("bots_sent", &bhash); }
+    println!("bots: {} profiles{}, {} events, {} token rows {}", bots.len(), if send_bots && sent { " (sent)" } else { "" }, new.len(), toks.len(), if sent { "shipped" } else { "spooled" });
 }
 
 // ---------- live stream ----------
@@ -566,9 +572,9 @@ fn live(mut until: u64) {
 }
 
 // ---------- loop ----------
-fn pass(c: &Connection, last_ms: u64) -> u64 {
-    let t = Instant::now();
-    collect(c); ship(c, last_ms); bot_sync(c);
+fn pass(last_ms: u64) -> u64 {
+    let t = Instant::now(); let mut st = St::load();
+    ship(&mut st, last_ms); st.save(); bot_sync(&mut st); st.save();
     t.elapsed().as_millis() as u64
 }
 fn lock() -> Option<fs::File> {
@@ -581,9 +587,14 @@ fn run_loop() {
     let me = std::process::id().to_string();
     let _ = Command::new("renice").args(["-n", "19", "-p", &me]).output(); let _ = Command::new("ionice").args(["-c3", "-p", &me]).output();
     let _ = fs::write(logs().join(".loop.pid"), &me);
-    let c = db(); let mut ms = 0;
+    let mut ms = 0;
     loop {
-        ms = pass(&c, ms);
+        ms = pass(ms);
+        // keep collector.out small (our stdout is appended there)
+        let co = logs().join("collector.out");
+        if fs::metadata(&co).map(|m| m.len()).unwrap_or(0) > 256 * 1024 {
+            if let Ok(b) = fs::read(&co) { let tail = &b[b.len() - 64 * 1024..]; let _ = fs::OpenOptions::new().write(true).truncate(true).open(&co).and_then(|mut f| f.write_all(tail)); }
+        }
         let (a, b) = settings();
         std::thread::sleep(Duration::from_secs(a.min(b)));
     }
@@ -648,30 +659,26 @@ fn cmd_prompt(a: &[String]) {
     let text = fs::read_to_string(&a[1]).unwrap_or_else(|_| die("usage: grugbox prompt routine_id prompt_file", 2));
     match post_json("/api/routines/prompt", &json!({"routine_id": a[0], "prompt": text})) { Ok(v) => println!("prompt sent, {} chars", v["chars"]), Err(e) => die(&format!("prompt failed: {}", e), 1) }
 }
+// Read logs from the server (the only store). Same filters as the Logs page.
 fn cmd_logs(a: &[String]) {
-    let c = db();
-    if a.first().map(|s| s.as_str()) == Some("sources") {
-        let mut q = c.prepare("select source,count(*),max(ts) from logs group by source order by 3 desc").unwrap();
-        for r in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))).unwrap().flatten() { println!("{:32} {:>7}  last {}", r.0, r.1, r.2); }
-        return;
-    }
-    let (mut w, mut p, mut n): (Vec<&str>, Vec<String>, i64) = (vec![], vec![], 50);
-    let mut i = 0;
+    let (mut q, mut n, mut i) = (vec![("range".to_string(), "24h".to_string())], 50usize, 0);
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{:02X}", b) }).collect::<String>();
     while i < a.len() {
         let v = a.get(i + 1).cloned().unwrap_or_default();
         match a[i].as_str() {
-            "-s" => { w.push("source like ?"); p.push(format!("%{}%", v)); } "-l" => { w.push("level=?"); p.push(v); }
-            "-g" => { w.push("message like ?"); p.push(format!("%{}%", v)); } "-n" => n = v.parse().unwrap_or(50),
-            "-t" => { let re = Regex::new(r"^(\d+)([mhd])$").unwrap(); w.push("ts>=?");
-                p.push(re.captures(&v).map(|m| local(now() - m[1].parse::<f64>().unwrap() * match &m[2] { "m" => 60.0, "h" => 3600.0, _ => 86400.0 })).unwrap_or(v)); }
-            _ => die("usage: grugbox logs [-s source] [-l level] [-t 2h|1d|date] [-g text] [-n 50] | grugbox logs sources", 2),
+            "-s" => q.push(("source".into(), v)), "-l" => q.push(("level".into(), v)), "-g" => q.push(("q".into(), v)), "-e" => q.push(("re".into(), v)),
+            "-t" => q[0].1 = v, "-n" => n = v.parse().unwrap_or(50),
+            _ => die("usage: grugbox logs [-s source] [-l level] [-t 1h|6h|24h|7d] [-g text] [-e regex] [-n 50]", 2),
         }
         i += 2;
     }
-    let sql = format!("select ts,level,source,message from logs{} order by ts desc, id desc limit {}", if w.is_empty() { String::new() } else { format!(" where {}", w.join(" and ")) }, n);
-    let mut q = c.prepare(&sql).unwrap();
-    let rows: Vec<(String, String, String, String)> = q.query_map(rusqlite::params_from_iter(p.iter()), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().flatten().collect();
-    for r in rows.iter().rev() { println!("{} {:5} {:20} {}", r.0, r.1, r.2, r.3); }
+    let path = format!("/api/logs?{}", q.iter().map(|(k, v)| format!("{}={}", k, enc(v))).collect::<Vec<_>>().join("&"));
+    match http("GET", &path, b"", false) {
+        Ok((_, b)) => { let v: Value = serde_json::from_str(&b).unwrap_or(json!({}));
+            let rows = v["rows"].as_array().cloned().unwrap_or_default();
+            for r in rows.iter().take(n).rev() { println!("{} {:5} {:20} {}", r["ts"].as_str().unwrap_or(""), r["level"].as_str().unwrap_or(""), r["source"].as_str().unwrap_or(""), r["message"].as_str().unwrap_or("")); } }
+        Err(e) => die(&format!("logs failed: {} (server keeps the logs; check .env)", e), 1),
+    }
 }
 
 fn main() {
@@ -679,10 +686,8 @@ fn main() {
     let rest = if a.len() > 1 { &a[1..] } else { &[][..] };
     match a.first().map(|s| s.as_str()).unwrap_or("") {
         "loop" => run_loop(),
-        "once" => { let c = db(); pass(&c, 0); }
-        "collect" => { collect(&db()); }
-        "ship" => ship(&db(), 0),
-        "bots" => bot_sync(&db()),
+        "once" => { pass(0); }
+        "spool" => { let f = spool_files(); println!("{} batches, {} bytes waiting", f.len(), f.iter().map(|x| x.1).sum::<u64>()); }
         "ensure-running" => ensure_running(),
         "reply" => cmd_reply(rest), "confirm" => cmd_confirm(rest), "prompt" => cmd_prompt(rest),
         "log-run" => cmd_log_run(rest), "register" => cmd_register(rest), "logs" => cmd_logs(rest),

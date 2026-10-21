@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # collect-logs.sh          one pass: collect locally, then ship new allowlisted lines
-# collect-logs.sh --loop   every ship interval (Settings, default 60s), single instance (flock), lowest CPU/IO priority, sleeps between passes
+# collect-logs.sh --loop   every min(ship, heartbeat) interval (Settings, default 60s), single instance (flock), lowest CPU/IO priority, sleeps between passes
 DIR="$(cd "$(dirname "$0")" && pwd)"
 pass(){ python3 "$DIR/collect_logs.py"; python3 "$DIR/ship_logs.py"; python3 "$DIR/bot_sync.py"; }
 if [ "${1:-}" = "--loop" ]; then

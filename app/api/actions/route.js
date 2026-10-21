@@ -6,6 +6,7 @@ export const dynamic="force-dynamic";
 const ACTIONS=["pause","resume","set_schedule","change_trigger","set_prompt"];
 export async function POST(req){
   const b=await req.json(); const q=sql(); await ensure(q); await ensureMessages(q);
+  if(b.action==="pause_all"||b.action==="resume_all") return all(req,q,b);
   const [r]=await q`select * from routines where routine_id=${b.routine_id||""}`;
   if(!r) return Response.json({error:"unknown routine"},{status:404});
   const thread_id=`routine:${r.routine_id}`;
@@ -40,4 +41,22 @@ export async function POST(req){
     text, dashboard_url:`${origin}/?thread=${encodeURIComponent(thread_id)}`});
   await q`update messages set delivered=${res.delivered} where id=${m.id}`;
   return Response.json({ok:true, thread_id, pending, ...res});
+}
+
+// Pause or resume every routine in one webhook call. Each affected routine gets a pending change; the inbox routine
+// works through the list and confirms each one with confirm.sh, exactly like a single pause/resume.
+async function all(req,q,b){
+  const pause=b.action==="pause_all", from=pause?"active":"paused", one=pause?"pause":"resume";
+  const rs=await q`select routine_id,name,bot,bot_id,status,schedule_or_trigger from routines where status=${from} and pending_action is null order by name`;
+  if(!rs.length) return Response.json({ok:true,count:0,note:`No ${from} routines without a pending change.`});
+  const pending={action:one,schedule:null,timing:null,human:pause?"Pause all routines":"Resume all routines",trigger_request:null,prompt:null,via:b.action};
+  const ids=rs.map(r=>r.routine_id);
+  await q`update routines set pending_action=${JSON.stringify(pending)}::jsonb, pending_since=now() where routine_id = any(${ids}::text[])`;
+  const thread_id="routines:all", also=b.also_chat===true||(await getSettings(q)).always_reply_in_chat;
+  const text=`Request: ${pause?"pause":"resume"} all ${rs.length} ${from} routines: ${rs.map(r=>`"${r.name}" (${r.routine_id}, ${r.bot})`).join(", ")}.`;
+  const [m]=await q`insert into messages(thread_id,role,text,also_chat) values(${thread_id},'user',${text},${also}) returning id`;
+  const res=await forward(q,{kind:"action",action:b.action,routines:rs.map(r=>({routine_id:r.routine_id,name:r.name,bot:r.bot,bot_id:r.bot_id,current_status:r.status})),
+    message_id:String(m.id),thread_id,also_chat:also,text,dashboard_url:`${new URL(req.url).origin}/chat?thread=${encodeURIComponent(thread_id)}`});
+  await q`update messages set delivered=${res.delivered} where id=${m.id}`;
+  return Response.json({ok:true,count:rs.length,thread_id,...res});
 }

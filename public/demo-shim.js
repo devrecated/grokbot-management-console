@@ -13,7 +13,9 @@
       if(m==="POST"){ put("demo:settings",{...get("demo:settings",{}),...body}); }
       const base=await (await real("/api/settings")).json(); return json({...base,...get("demo:settings",{})});
     }
+    if(url.pathname==="/api/alerts/test"&&m==="POST") return json({sent:false,reason:"demo mode never sends email"});
     if(url.pathname==="/api/actions"&&m==="POST"){
+      if(body.action==="pause_all"||body.action==="resume_all") return json({ok:true,demo:true,delivered:true,count:document.querySelectorAll("tbody tr").length?1:0,note:"Demo: one "+body.action+" request would go to Grok Bot, then each routine confirms."});
       if(body.action==="cancel") return json({ok:true,cancelled:true});
       if(body.action==="fetch_prompt") return json({ok:true,fetching:true,delivered:true});
       return json({ok:true,delivered:true,thread_id:"routine:"+body.routine_id,pending:{action:body.action,schedule:body.schedule||null,human:body.action==="set_prompt"?`Update prompt (${String(body.prompt||"").length} chars)`:(body.human||body.action)}});

@@ -5,6 +5,8 @@ import os, sys, json, gzip, sqlite3, fnmatch, time, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect_logs import redact
 from instance import info
+from interval import settings
+import sysinfo
 DIR=os.path.dirname(os.path.abspath(__file__)); DB=os.path.join(DIR,"logs","box-logs.db"); CUR=os.path.join(DIR,"logs",".ship_cursor")
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*a,**k): return None
@@ -19,18 +21,30 @@ def main():
     rows=db.execute("select id,ts,source,level,message from logs where id>? order by id limit ?",(last,cfg.get("max_batch",2000))).fetchall()
     cat_sent=os.path.join(DIR,"logs",".catalog_sent"); cat=json.dumps(cfg.get("catalog",{}),sort_keys=True)
     send_cat=not os.path.exists(cat_sent) or open(cat_sent).read()!=cat
-    hb=os.path.join(DIR,"logs",".heartbeat"); stale=not os.path.exists(hb) or time.time()-os.path.getmtime(hb)>300
-    if not rows and not send_cat and not stale:  # nothing new: no request, except a tiny heartbeat every 5 min
-        open(CUR,"w").write(str(last)); return
+    st=settings(); due=lambda f,s: not os.path.exists(f) or time.time()-os.path.getmtime(f)>=s-3
+    hb=os.path.join(DIR,"logs",".heartbeat"); stale=due(hb,st["heartbeat_interval_s"])  # heartbeat + CPU/mem sample
+    shp=os.path.join(DIR,"logs",".shipped")
+    if not due(shp,st["ship_interval_s"]): rows=[]  # loop runs at the faster of the two intervals; lines wait for theirs
+    if not rows and not send_cat and not stale:  # nothing due: no request
+        if last is not None and not os.path.exists(CUR): open(CUR,"w").write(str(last))
+        return
     off=time.strftime("%z"); off=off[:3]+":"+off[3:]  # box-local times
     import re; UTC=re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:?00)")
     batch=[{"ts":r[1]+("Z" if UTC.search(r[4][:80]) else off),"source":r[2],"level":r[3],"message":redact(r[4])} for r in rows if ok(r[2])]
     if batch or send_cat or stale:
+        inst=info()
+        try:
+            if stale: inst["sample"]=sysinfo.sample()
+            osf=os.path.join(DIR,"logs",".os_sent")  # OS facts once per boot
+            if not os.path.exists(osf) or open(osf).read()!=inst["instance_id"]: inst["os"]=sysinfo.os_info()
+        except Exception: pass
         env=dict(l.rstrip("\n").split("=",1) for l in open(os.path.join(DIR,".env")) if "=" in l)
-        req=urllib.request.Request(env["ROUTINE_LOG_URL"].rstrip("/")+"/api/logs",data=gzip.compress(json.dumps({"instance":info(),"rows":batch,**({"catalog":cfg.get("catalog")} if send_cat else {})}).encode()),
+        req=urllib.request.Request(env["ROUTINE_LOG_URL"].rstrip("/")+"/api/logs",data=gzip.compress(json.dumps({"instance":inst,"rows":batch,**({"catalog":cfg.get("catalog")} if send_cat else {})}).encode()),
             headers={"content-type":"application/json","content-encoding":"gzip","authorization":"Bearer "+env["ROUTINE_LOG_TOKEN"],"x-vercel-protection-bypass":env.get("VERCEL_BYPASS","")})
         urllib.request.build_opener(NoRedirect).open(req,timeout=15).read()  # raises on non-2xx -> cursor not advanced
-    open(hb,"w").write("")
+    if stale: open(hb,"w").write("")
+    if rows: open(shp,"w").write("")
+    if "os" in inst: open(os.path.join(DIR,"logs",".os_sent"),"w").write(inst["instance_id"])
     if send_cat: open(cat_sent,"w").write(cat)
     if rows: open(CUR,"w").write(str(rows[-1][0]))
     print(f"shipped {len(batch)} of {len(rows)} new lines")

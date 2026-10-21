@@ -57,3 +57,9 @@ button{background:#1d2330;color:#fff;cursor:pointer}button:disabled{opacity:.5}
 .tg-h{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#888;padding:8px 10px 2px!important;cursor:default!important;border:0!important}
 .diff{background:#fff;border:1px solid #e3e6ea;border-radius:6px;padding:6px;max-height:320px;overflow:auto;font-size:12px}.diff .add{background:#e6f4ea;color:#137333}.diff .del{background:#fde7e9;color:#c5221f}
 .demo-bar{background:#fff4c2;border-bottom:1px solid #e6d27a;padding:6px 16px;font-size:13px;text-align:center}
+.srow{display:flex;gap:8px;align-items:flex-start;margin-top:12px}.srow .muted{margin-top:2px}
+.warnbox{background:#fff4e5;border:1px solid #f0b46a;border-radius:6px;padding:8px 10px;margin-bottom:10px}
+.tplgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:800px){.tplgrid{grid-template-columns:1fr}}
+.savenote{position:sticky;bottom:8px;background:#fff;display:inline-block;padding:4px 8px;border-radius:6px;border:1px solid #ddd}
+.spark{vertical-align:middle}.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:13px}
+.tabs-mini a{margin-left:10px;color:#1d2330}.tabs-mini a.on{font-weight:700;text-decoration:none}

@@ -1,6 +1,6 @@
 # Dashboard inbox routine
 
-console have buttons and chat box. but console not do routine work itself. console send webhook to Grok Bot. this routine catch webhook and do work: pause, resume, new schedule, new trigger, new prompt, fetch prompt, answer chat. then it tell console "done" with `confirm.sh` and `reply.sh`.
+console have buttons and chat box. but console not do routine work itself. console send webhook to Grok Bot. this routine catch webhook and do work: pause, resume, pause all, resume all, new schedule, new trigger, new prompt, fetch prompt, answer chat. then it tell console "done" with `confirm.sh` and `reply.sh`.
 
 prompt is in [`dashboard-inbox.prompt.md`](dashboard-inbox.prompt.md).
 

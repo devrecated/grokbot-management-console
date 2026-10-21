@@ -2,13 +2,14 @@
 // Bots as a TanStack table: sortable columns, search, click a row to expand description, recent actions and routines.
 import { useMemo, useState } from "react";
 import { useReactTable, getCoreRowModel, getSortedRowModel, getFilteredRowModel, getExpandedRowModel, flexRender } from "@tanstack/react-table";
-const fmt=d=>d?new Date(d).toLocaleString("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"never";
-export default function BotsTable({data}){
+import { tzLabel } from "@/lib/tz";
+export default function BotsTable({data,tz="America/New_York"}){
+  const fmt=d=>d?new Date(d).toLocaleString("en-US",{timeZone:tz,month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"never";
   const [sorting,setSorting]=useState([{id:"last_at",desc:true}]),[search,setSearch]=useState(""),[expanded,setExpanded]=useState({});
   const columns=useMemo(()=>[
     {id:"name",header:"Name",accessorKey:"name",cell:({row})=><span style={{display:"flex",gap:8,alignItems:"center"}}><span className="av sm" style={{background:row.original.color||"#1d2330"}}>{(row.original.name||"?")[0]}</span><b>{row.original.name}</b></span>},
     {id:"title",header:"Title",accessorKey:"title"},
-    {id:"last_at",header:"Last active (ET)",accessorFn:r=>r.last_at?new Date(r.last_at).getTime():0,cell:({row})=>fmt(row.original.last_at)},
+    {id:"last_at",header:`Last active (${tzLabel(tz)})`,accessorFn:r=>r.last_at?new Date(r.last_at).getTime():0,cell:({row})=>fmt(row.original.last_at)},
     {id:"actions",header:"Actions 7d",accessorKey:"actions"},
     {id:"routines",header:"Routines",accessorFn:r=>r.routines.length},
     {id:"top",header:"Top tool",accessorKey:"top",cell:c=>c.getValue()?<span className="chip">{c.getValue()}</span>:<span className="muted">–</span>},

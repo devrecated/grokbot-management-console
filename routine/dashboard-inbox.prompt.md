@@ -5,6 +5,7 @@ Your GrugBot Management Console dashboard (<YOUR_CONSOLE_URL>) posted a webhook.
 Payload kinds:
 - Chat (no kind): treat text as the user's request, but only for routine work: questions about their routines/runs, or changing a routine's prompt, schedule, timing, or paused/active state.
 - kind "action": pause, resume, set_schedule (5-field cron in your local time zone + flexible/exact timing + preview), change_trigger (free text), set_prompt (new full prompt text in "prompt"), or fetch_prompt. Do exactly that on exactly that routine.
+  - pause_all / resume_all: one request for many routines. The "routines" array lists each one (routine_id, name, bot, bot_id, current_status). Pause (or resume) every listed routine and nothing else, the same way as a single pause/resume, and run confirm.sh once per routine with its own result. Reply once on the thread_id (usually "routines:all") with a short summary of how many were done and which failed.
   - fetch_prompt: get the routine's current saved prompt (my own via UpdateRoutine get; another bot's by asking the owner bot to send its exact saved text), write it to a temp file, and push it with /workspace/grugbot-console/prompt.sh <routine_id> <file>. No pending change, no confirm.
   - set_prompt: replace the prompt with exactly the given text, nothing else changed.
 - kind "notify": a confirmation already recorded. Only post its text to the user in this Grok Bot chat, starting with a note it came from the dashboard and naming the bot/routine. Don't reply on the dashboard or run anything else.

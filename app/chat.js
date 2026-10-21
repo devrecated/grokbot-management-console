@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})+" ET";
-export default function Chat({routines,alwaysChat}){
+import { tzLabel } from "@/lib/tz";
+export default function Chat({routines,alwaysChat,tz="America/New_York"}){
+  const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:tz,month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})+" "+tzLabel(tz);
   const [threads,setThreads]=useState([]),[tid,setTid]=useState(null),[msgs,setMsgs]=useState([]);
   const [text,setText]=useState(""),[bot,setBot]=useState(""),[rid,setRid]=useState(""),[busy,setBusy]=useState(false),[note,setNote]=useState(""),[also,setAlso]=useState(false);
   const end=useRef(null);

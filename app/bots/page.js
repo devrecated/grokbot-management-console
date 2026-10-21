@@ -1,6 +1,7 @@
 import { sql, ensure, ensureBots } from "@/lib/db";
 import Nav from "../nav";
 import BotsTable from "./table";
+import { getSettings } from "@/lib/settings";
 export const dynamic="force-dynamic";
 export default async function Bots(){
   const q=sql(); await ensure(q); await ensureBots(q);
@@ -14,5 +15,5 @@ export default async function Bots(){
     tools:(C[b.key]||[]).slice(0,8), recent:(R[b.key]||[]).map(e=>({ts:String(e.ts),tool:e.tool,target:e.target})), routines:RT[b.name]||[]}));
   return <><Nav active="bots"/><main><h2>Bots</h2>
     <p className="muted" style={{marginTop:0}}>Activity shows only what kind of action happened and when. No commands, messages or results leave the box.</p>
-    <BotsTable data={data}/></main></>;
+    <BotsTable data={data} tz={(await getSettings(q)).timezone}/></main></>;
 }

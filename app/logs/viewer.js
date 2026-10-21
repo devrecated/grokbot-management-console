@@ -9,7 +9,9 @@ import Info from "./info";
 const RANGES=["15m","1h","6h","24h","7d"], LEVELS=["error","warn","info","debug"];
 const EMPTY={instance:[],source:[],level:[],xsource:[],xlevel:[],q:"",re:"",range:"24h",from:"",to:"",around:""};
 const LISTS=["instance","source","level","xsource","xlevel"];
-const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:"America/New_York",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"});
+import { tzLabel } from "@/lib/tz";
+let TZ="America/New_York"; // set from Settings on each render
+const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:TZ,month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"});
 const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
 function fromUrl(){ const p=new URLSearchParams(location.search), f={...EMPTY};
   for(const k of Object.keys(EMPTY)) if(p.has(k)) f[k]=LISTS.includes(k)?p.get(k).split(",").filter(Boolean):p.get(k); return f; }
@@ -27,7 +29,8 @@ function Multi({label,values,inc,exc,onChange}){ // multi-select with counts and
       <label><input type="checkbox" checked={inc.includes(v)} onChange={e=>onChange(e.target.checked?[...inc,v]:inc.filter(x=>x!==v),exc.filter(x=>x!==v))}/>{v} <span className="muted">{n}</span></label>
       <button title="exclude" className={"x"+(exc.includes(v)?" on":"")} onClick={()=>onChange(inc.filter(x=>x!==v),exc.includes(v)?exc.filter(x=>x!==v):[...exc,v])}>⊘</button></div>)}
     {!values.length&&<span className="muted">none in range</span>}</div></details>; }
-export default function Viewer({grug}){
+export default function Viewer({grug,tz}){
+  if(tz) TZ=tz;
   const [f,setF]=useState(null),[draft,setDraft]=useState({q:"",re:"",mode:"contains"});
   const [rows,setRows]=useState([]),[meta,setMeta]=useState({facets:[],catalog:null,per:200}),[err,setErr]=useState("");
   const [live,setLive]=useState(false),[busy,setBusy]=useState(false),[more,setMore]=useState(false),[copied,setCopied]=useState(null);
@@ -53,7 +56,7 @@ export default function Viewer({grug}){
   const data=useMemo(()=>{ const ids=new Set(rows.map(r=>r.id)); return [...Object.values(pinned).filter(r=>!ids.has(r.id)),...rows]; },[rows,pinned]);
   const columns=useMemo(()=>[
     {id:"pin",header:"",size:34,enableSorting:false,enableResizing:false,enableHiding:false,cell:({row})=><button title="pin to top" className={"ghost cp"+(pinned[row.original.id]?" pinned":"")} onClick={e=>{e.stopPropagation();togglePin(row.original);}}>📌</button>},
-    {id:"t",header:"Time (ET)",accessorKey:"ts",size:160,cell:c=>fmt(c.getValue())},
+    {id:"t",header:`Time (${tzLabel(TZ)})`,accessorKey:"ts",size:160,cell:c=>fmt(c.getValue())},
     {id:"level",header:"Level",accessorKey:"level",size:76,cell:c=><span className={`pill ${c.getValue()}`} onClick={e=>pick("level",c.getValue(),e)} title="click: filter · shift-click: exclude">{c.getValue()}</span>},
     {id:"s",header:"Source",accessorKey:"source",size:210,cell:c=><span className="val" onClick={e=>pick("source",c.getValue(),e)} title="click: filter · shift-click: exclude">{c.getValue()}</span>},
     {id:"inst",header:"Instance",accessorFn:r=>r.instance_id||"",size:80,cell:c=>c.getValue()?<span className="val" title={c.getValue()} onClick={e=>{e.stopPropagation();set({instance:f.instance.includes(c.getValue())?f.instance.filter(x=>x!==c.getValue()):[...f.instance,c.getValue()]});}}>{c.getValue().slice(0,6)}</span>:<span className="muted">–</span>},

@@ -1,10 +1,11 @@
 // Box log ingest. Bearer ROUTINE_LOG_TOKEN (+ Vercel bypass header). Body: JSON array, optionally gzip (content-encoding: gzip).
 // Body: JSON array of rows, or {rows, catalog}. catalog (what is tracked/excluded) is stored in config key log_catalog for the /logs tooltip.
-// Keeps Neon small: 7-day retention and a hard row cap, pruned on every ingest.
+// Keeps Neon small: retention from Settings (default 7 days) and a hard row cap, pruned on every ingest.
 import { sql, authed, ensureLogs, heartbeat } from "@/lib/db";
 import { gunzipSync } from "zlib";
+import { getSettings } from "@/lib/settings";
 export const dynamic="force-dynamic";
-const KEEP_DAYS=7, MAX_ROWS=200000, MAX_BATCH=5000;
+const MAX_ROWS=200000, MAX_BATCH=5000;
 const LEVELS=["debug","info","warn","error"];
 const clean=(v,n)=>String(v).replace(/\u0000/g,"").slice(0,n); // Postgres text cannot hold NUL bytes
 export async function POST(req){
@@ -22,8 +23,9 @@ export async function POST(req){
   const q=sql(); await ensureLogs(q); const iid=await heartbeat(q,inst);
   if(catalog){ const c=JSON.stringify(catalog); if(c.length<50000) await q`insert into config(key,value,updated_at) values('log_catalog',${c}::jsonb,now()) on conflict(key) do update set value=excluded.value, updated_at=now()`; }
   if(rows.length) await q`insert into logs(ts,source,level,message,instance_id) select *, ${iid}::text from unnest(${rows.map(r=>r.ts)}::timestamptz[],${rows.map(r=>r.source)}::text[],${rows.map(r=>r.level)}::text[],${rows.map(r=>r.message)}::text[])`;
-  await q`delete from logs where ts < now() - make_interval(days => ${KEEP_DAYS})`;
-  await q`delete from logs where id <= (select id from logs order by id desc offset ${MAX_ROWS} limit 1)`;
+  if(rows.length){ const keep=(await getSettings(q)).log_retention_days;
+  await q`delete from logs where ts < now() - make_interval(days => ${keep})`;
+  await q`delete from logs where id <= (select id from logs order by id desc offset ${MAX_ROWS} limit 1)`; }
   return Response.json({ok:true,inserted:rows.length});
 }
 

@@ -13,7 +13,7 @@ export default function PromptEditor({r,fetching,busy,onSave,onRefetch,onClose})
   if(fetching) return <div className="muted">Fetching the current prompt from {r.bot}… this updates by itself. <button className="link" onClick={onClose}>close</button></div>;
   const d=show?diff(cur,text):[], changed=text!==cur;
   return <div>
-    <div className="muted" style={{marginBottom:6}}>{r.prompt_fetched_at?`Current prompt as of ${new Date(r.prompt_fetched_at).toLocaleString("en-US",{timeZone:"America/New_York"})} ET`:"No prompt on file yet."} <button className="link" onClick={onRefetch}>refetch</button></div>
+    <div className="muted" style={{marginBottom:6}}>{r.prompt_fetched_at?`Current prompt as of ${new Date(r.prompt_fetched_at).toLocaleString("en-US",{timeZone:r.tz||"America/New_York"})} ${r.tzl||"ET"}`:"No prompt on file yet."} <button className="link" onClick={onRefetch}>refetch</button></div>
     <textarea value={text} onChange={e=>setText(e.target.value)} rows={14} style={{width:"100%",fontFamily:"ui-monospace,monospace",fontSize:12}}/>
     <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}>
       <button disabled={busy||!changed||!text.trim()} onClick={()=>onSave(text)}>Save (needs bot confirm)</button>

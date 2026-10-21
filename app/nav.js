@@ -1,6 +1,6 @@
 import Grug from "./grug";
 import BoxStatus from "./box-status";
-const TABS=[["bots","Bots","/bots"],["routines","Routines","/"],["logs","Logs","/logs"],["chat","Chat","/chat"]];
+const TABS=[["bots","Bots","/bots"],["routines","Routines","/"],["logs","Logs","/logs"],["chat","Chat","/chat"],["box","Box","/box"],["usage","Usage","/usage"]];
 export default function Nav({right,active}){return <header style={{alignItems:"center"}}>
   <a href="/" style={{color:"#fff",textDecoration:"none",display:"flex",gap:8,alignItems:"center"}}><Grug size={28}/><b>GrugBot Management Console</b></a>
   <nav className="tabs">{TABS.map(([k,l,h])=><a key={k} href={h} className={active===k?"on":""}>{l}</a>)}</nav>

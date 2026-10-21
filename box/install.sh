@@ -34,7 +34,7 @@ done
 v="$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo dev)"; [ "$(cat "$INSTALL_DIR/VERSION" 2>/dev/null)" = "$v" ] || echo "$v" > "$INSTALL_DIR/VERSION"
 chmod 700 "$INSTALL_DIR"/*.sh "$INSTALL_DIR"/*.py 2>/dev/null || true
 [ -f "$INSTALL_DIR/env.example" ] || cp "$SRC/env.example" "$INSTALL_DIR/env.example" 2>/dev/null || true
-mkdir -p "$INSTALL_DIR/logs"; chmod 700 "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR/logs"; chmod 700 "$INSTALL_DIR/logs"; rm -f "$INSTALL_DIR/logs/.interval"  # old single-interval cache, now logs/.settings
 find "$INSTALL_DIR/logs" -type f -exec chmod 600 {} + 2>/dev/null || true
 
 # 3. Config: keep existing .env, add any missing keys from the environment.

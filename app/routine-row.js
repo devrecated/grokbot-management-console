@@ -9,7 +9,7 @@ export default function RoutineRow({r, last}){
   const [trig,setTrig]=useState(""),[edit,setEdit]=useState(false),[asked,setAsked]=useState(false);
   useEffect(()=>{setPending(r.pending_action);},[JSON.stringify(r.pending_action)]);
   const event=isEvent(r.schedule_or_trigger);
-  const b=build(s);
+  const b=build(s,r.tzl);
   const paused=r.status==="paused";
   async function act(body){
     setBusy(true); setNote("");
@@ -54,7 +54,7 @@ export default function RoutineRow({r, last}){
         {s.freq==="weekly"&&<span style={{display:"flex",gap:4}}>{[1,2,3,4,5,6,0].map(chip)}</span>}
         {s.freq==="monthly"&&<label>day <select value={s.dom} onChange={e=>set("dom",e.target.value)}>{Array.from({length:28},(_,i)=><option key={i+1}>{i+1}</option>)}</select></label>}
         {s.freq==="custom"&&<input placeholder="m h dom mon dow" value={s.cron} onChange={e=>set("cron",e.target.value)} style={{fontFamily:"monospace"}}/>}
-        <span className="muted">Timezone: ET</span>
+        <span className="muted">Timezone: {r.tzl||"ET"}</span>
         <select value={s.timing} onChange={e=>set("timing",e.target.value)}><option value="exact">Exact time</option><option value="flexible">Flexible (± a few min)</option></select>
         <div style={{flexBasis:"100%"}}><b>{b.human}</b>{b.cron&&<code className="muted"> {b.cron}</code>}</div>
         <button disabled={busy||!/^\S+ \S+ \S+ \S+ \S+$/.test(b.cron)} onClick={()=>act({action:"set_schedule",schedule:b.cron,timing:s.timing,human:b.human+(s.timing==="flexible"?" (flexible)":"")})}>Request change</button>

@@ -5,5 +5,5 @@ If you have routines, for each one:
 1. Register it once:
    $INSTALL_DIR/register.sh '<your bot name>' '<your bot id>' '<routine id>' '<routine name>' '<schedule or trigger>' '<one-line purpose>'
 2. Update that routine's prompt (UpdateRoutine update, prompt only) to add this as its final step:
-   Run $INSTALL_DIR/log-run.sh '<your bot name>' '<routine id>' ok|error|skipped '<one-line summary of what you did>'
+   Run $INSTALL_DIR/log-run.sh '<your bot name>' '<routine id>' ok|error|skipped '<one-line summary of what you did>' [seconds the run took, optional]
    No secrets, tokens, or personal data in the summary. Change nothing else in the routine.

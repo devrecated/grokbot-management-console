@@ -2,11 +2,12 @@
 // Settings, saved one field at a time (templates on "Save"). Plain controls, no libs.
 import { useState } from "react";
 import { DEFAULT_TEMPLATES, render, templates } from "@/lib/alert-templates";
+import TokenPrices from "./token-prices";
 const TZS=["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Anchorage","Pacific/Honolulu","America/Sao_Paulo","UTC","Europe/London","Europe/Berlin","Europe/Warsaw","Africa/Johannesburg","Asia/Kolkata","Asia/Singapore","Asia/Tokyo","Australia/Sydney"];
 const secs=v=>v<60?`${v} seconds`:v===60?"1 minute":`${v/60} minutes`;
 const Row=({title,children,help})=><label className="srow"><span><b>{title}</b> {children}{help&&<div className="muted">{help}</div>}</span></label>;
 const Sel=({v,opts,on,fmt=x=>x})=><select value={v} onChange={e=>on(isNaN(e.target.value)?e.target.value:Number(e.target.value))}>{opts.map(o=><option key={o} value={o}>{fmt(o)}</option>)}</select>;
-export default function Form({initial,mail}){
+export default function Form({initial,mail,models=[]}){
   const [s,setS]=useState(initial),[note,setNote]=useState(""),[kind,setKind]=useState("fail");
   const [t,setT]=useState(templates(initial)),[test,setTest]=useState("");
   async function save(patch){ setNote("Saving…"); const r=await fetch("/api/settings",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(patch)});
@@ -56,9 +57,10 @@ export default function Form({initial,mail}){
           <iframe title="preview" sandbox="" srcDoc={render(t[p+"_html"],vars,true)} style={{width:"100%",height:380,border:"1px solid #ddd",borderRadius:6,background:"#fff"}}/></div></div></div>
 
     <div className="bot"><h3>Cost estimate rates</h3>
-      <div className="muted" style={{marginBottom:8}}>Grok Bot does not report prices or tokens to the box, so the Usage page multiplies what it can count by your own rates. Leave 0 to show usage only.</div>
+      <div className="muted" style={{marginBottom:8}}>Grok Bot does not report prices or tokens to the box. The Usage page multiplies what it can count by your own rates, and estimates tokens from transcript size. Leave blank or 0 to show usage only.</div>
       {[["cost_per_run","per run"],["cost_per_run_minute","per run minute"],["cost_per_action","per bot action"]].map(([k,l])=>
         <Row key={k} title={l}><input type="number" min="0" step="0.0001" defaultValue={s[k]} onBlur={e=>Number(e.target.value)!==s[k]&&set(k,Number(e.target.value)||0)} style={{width:110}}/> {s.currency}</Row>)}
-      <Row title="Currency"><Sel v={s.currency} opts={["USD","EUR","GBP","PLN","CAD","AUD","JPY"]} on={v=>set("currency",v)}/></Row></div>
+      <Row title="Currency"><Sel v={s.currency} opts={["USD","EUR","GBP","PLN","CAD","AUD","JPY"]} on={v=>set("currency",v)}/></Row>
+      <TokenPrices value={s.token_prices} models={models} currency={s.currency} onSave={v=>set("token_prices",v)}/></div>
     {note&&<div className="muted savenote">{note}</div>}</div>;
 }

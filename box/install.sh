@@ -12,7 +12,7 @@ umask 077
 mkdir -p "$INSTALL_DIR"
 
 # 1. Source: this checkout if we are in one, else clone/pull into $INSTALL_DIR/.src
-if [ -f "$HERE/collect_logs.py" ] && git -C "$HERE" rev-parse --show-toplevel >/dev/null 2>&1; then
+if [ -f "$HERE/grugbox/Cargo.toml" ] && git -C "$HERE" rev-parse --show-toplevel >/dev/null 2>&1; then
   SRC="$HERE"
 else
   if [ -d "$INSTALL_DIR/.src/.git" ]; then git -C "$INSTALL_DIR/.src" pull -q --ff-only
@@ -33,6 +33,13 @@ for f in "$SRC"/*; do
 done
 v="$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo dev)"; [ "$(cat "$INSTALL_DIR/VERSION" 2>/dev/null)" = "$v" ] || echo "$v" > "$INSTALL_DIR/VERSION"
 chmod 700 "$INSTALL_DIR"/*.sh "$INSTALL_DIR"/*.py 2>/dev/null || true
+# The box agent: prebuilt static binary when the arch matches, else build it from grugbox/ with cargo.
+gb="$SRC/grugbox/grugbox-$(uname -m)-linux"; gbnew=0
+if [ ! -x "$gb" ] || ! "$gb" version >/dev/null 2>&1; then
+  if command -v cargo >/dev/null 2>&1; then (cd "$SRC/grugbox" && cargo build --release -q) && gb="$SRC/grugbox/target/release/grugbox"
+  else echo "grugbox: no prebuilt binary for $(uname -m) and no cargo. Install Rust (https://rustup.rs) and run install.sh again." >&2; exit 4; fi
+fi
+if ! cmp -s "$gb" "$INSTALL_DIR/grugbox"; then cp "$gb" "$INSTALL_DIR/.grugbox.tmp" && chmod 700 "$INSTALL_DIR/.grugbox.tmp" && mv -f "$INSTALL_DIR/.grugbox.tmp" "$INSTALL_DIR/grugbox"; gbnew=1; fi
 [ -f "$INSTALL_DIR/env.example" ] || cp "$SRC/env.example" "$INSTALL_DIR/env.example" 2>/dev/null || true
 mkdir -p "$INSTALL_DIR/logs"; chmod 700 "$INSTALL_DIR/logs"; rm -f "$INSTALL_DIR/logs/.interval"  # old single-interval cache, now logs/.settings
 find "$INSTALL_DIR/logs" -type f -exec chmod 600 {} + 2>/dev/null || true
@@ -51,9 +58,12 @@ if [ "${#missing[@]}" -gt 0 ]; then echo "missing: ${missing[*]}  (set them as e
 
 # 4. Start the loop unless it is already running.
 if flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null; then
-  "$INSTALL_DIR/start-log-loop.sh"; echo "installed in $INSTALL_DIR; loop started"
-elif [ "$changed" = 1 ]; then
-  echo "installed in $INSTALL_DIR; scripts updated, loop already running (picks up changes on its next pass)"
+  "$INSTALL_DIR/grugbox" ensure-running >/dev/null; echo "installed in $INSTALL_DIR; loop started"
+elif [ "$changed" = 1 ] || [ "$gbnew" = 1 ]; then
+  # a running loop keeps the old program in memory: stop it (only that one process) and start the new one
+  pid="$(cat "$INSTALL_DIR/logs/.loop.pid" 2>/dev/null || true)"
+  if [ -n "$pid" ] && grep -qa -e collect-logs -e grugbox "/proc/$pid/cmdline" 2>/dev/null; then kill "$pid" 2>/dev/null || true; for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$INSTALL_DIR/logs/.loop.lock" true 2>/dev/null && break; sleep 0.5; done; fi
+  "$INSTALL_DIR/grugbox" ensure-running >/dev/null; echo "installed in $INSTALL_DIR; loop restarted on the new grugbox"
 else
   echo "up to date in $INSTALL_DIR; loop already running"
 fi

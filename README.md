@@ -127,24 +127,60 @@ no `SMTP_URL`? Settings say so in orange box, and nothing send. one run = one em
 </details>
 
 <details>
-<summary>box script reference</summary>
+<summary>box agent reference (grugbox)</summary>
 
-| Script | What it do |
+all box work is one small Rust program, `grugbox` (source in [`box/grugbox`](box/grugbox)). it collect logs, redact, ship, heartbeat, CPU/memory, bot activity, token estimates, Live stream. old `*.sh` names still work. each one is one line that call grugbox.
+
+| Command | What it do |
 |---|---|
-| `install.sh` | install or update. keeps `.env`, `.token`, `logs/`, `runs.jsonl`, `registry.jsonl`, your edited `ship-config.json` |
-| `ensure-running.sh` | start log loop if dead. few milliseconds if alive. routines run it on wake, so loop survive reboot |
-| `register.sh bot bot_id routine_id name schedule_or_trigger purpose [active\|paused]` | add or update routine on console |
-| `log-run.sh bot routine_id ok\|error\|skipped summary [seconds]` | record one run. optional seconds feed run minutes on Usage page |
-| `reply.sh thread_id text` | Grok Bot reply into chat thread |
-| `confirm.sh routine_id ok\|fail ['{json}'] ['note']` | finish (or reject) pending change |
-| `prompt.sh routine_id prompt_file` | send routine prompt to console (answer to fetch) |
-| `logs.sh [-s source] [-l level] [-t 2h] [-g text] [-n 50]` / `logs.sh sources` | read local log copy |
-| `sysinfo.py` | print OS facts and one CPU/memory sample (what heartbeat send) |
-| `interval.py [ship\|heartbeat]` | print loop sleep (or one interval) from Settings |
+| `install.sh` | install or update. copy prebuilt grugbox (or build it with cargo). keeps `.env`, `.token`, `logs/`, `runs.jsonl`, `registry.jsonl`, your edited `ship-config.json`. restart loop when grugbox change |
+| `grugbox ensure-running` | start loop if dead. few milliseconds if alive. routines run it on wake, so loop survive reboot |
+| `grugbox register bot bot_id routine_id name schedule_or_trigger purpose [active\|paused]` | add or update routine on console |
+| `grugbox log-run bot routine_id ok\|error\|skipped summary [seconds]` | record one run. optional seconds feed run minutes on Usage page |
+| `grugbox reply thread_id text` | Grok Bot reply into chat thread |
+| `grugbox confirm routine_id ok\|fail ['{json}'] ['note']` | finish (or reject) pending change |
+| `grugbox prompt routine_id prompt_file` | send routine prompt to console (answer to fetch) |
+| `grugbox logs [-s source] [-l level] [-t 2h] [-g text] [-n 50]` / `grugbox logs sources` | read local log copy |
+| `grugbox once` / `grugbox loop` | one pass / forever (loop is what ensure-running start) |
+| `grugbox sample` / `grugbox os` | print one CPU/memory sample / OS facts (what heartbeat send) |
+| `grugbox redact < file` | show what redaction do to some lines |
+| `grugbox live <until>` | Live stream. loop start it for you when Box page say Live |
+
+build it yourself:
+
+```bash
+cd box/grugbox
+cargo build --release                      # target/release/grugbox
+# static, like the committed box/grugbox/grugbox-x86_64-linux:
+RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-unknown-linux-gnu
+```
+
+four crates only: `regex`, `serde_json`, `flate2`, `rusqlite` (bundled SQLite, same `logs/box-logs.db` the old Python used, so swap keep every cursor), plus `sha2`. HTTP go through system `curl`, token in 0600 header file, never on command line. binary about 3.6 MB static.
 
 `.env` keys: `ROUTINE_LOG_URL`, `ROUTINE_LOG_TOKEN`, `VERCEL_BYPASS`. how each bot register its routines: [`box/SETUP.md`](box/SETUP.md).
 
 </details>
+
+## Tokens (estimated from transcripts)
+
+Grok Bot not tell box how many tokens it use. so grugbox guess, cheap way:
+
+- it already read new transcript lines for bot activity. same bytes, no second read.
+- each assistant line = one model call. input = system prompt size + conversation so far (capped at 200k tokens, because long chats get summarized). output = that line.
+- bytes to tokens: 3.9 bytes per token. grug measured this against o200k tokenizer on 25 real transcripts (3.92). no tokenizer installed.
+- ship only per-minute totals: bot, model, calls, input, output. no text leave box.
+- prompt caching and hidden tool context not counted. treat as size, not bill.
+- Usage page show tokens per bot and per routine (bot tokens during the run). cost only appear when you type your own price per 1M tokens per model in Settings. no price = no cost. grug not invent prices.
+- cost: one extra add per line. measured: pass time same within noise (0.08 s for 2 MB of new transcript, with or without).
+
+## Live
+
+Box page has **Go live**. press it and box send CPU/memory every 2 s for 5 minutes, then stop by itself.
+
+- button set `live_until` in database. box see it in reply to its next heartbeat or log ship (up to one interval), start `grugbox live`.
+- live process send batch every 6 s, ask server each time "still live?". Stop button = it quit within 6 s.
+- nothing run when nobody watch. page only poll while Live on and tab visible.
+- measured: live process 0.16% of one core (with its curl calls), 2.3 MB memory.
 
 ## Database
 
@@ -176,7 +212,7 @@ flowchart LR
   subgraph Box["Bot machine (box)"]
     R[Routines] -->|register.sh / log-run.sh| API
     W[Inbox routine] -->|reply.sh / confirm.sh| API
-    C[collect-logs.sh<br/>local SQLite] -->|ship_logs.py<br/>gzip batch| API
+    C[grugbox<br/>local SQLite] -->|gzip batch via curl| API
   end
   subgraph Vercel["Vercel (Deployment Protection on)"]
     UI[Dashboard pages] --- API[API routes]
@@ -261,18 +297,22 @@ grug not snoop. box send only this:
 | bot activity | time, bot, event or tool name, target bot name. no commands, args, messages, results | 7 days, max 50,000 events |
 | bot profiles | name, title, description, colour from `profile.json`. bot ids hashed | latest |
 | heartbeat | hashed `machine_id` (stable) and `instance_id` (per boot), hostname, boot time, version. once per boot: distro, kernel, arch, cores, RAM | 30 days |
-| box sample | with each heartbeat: CPU %, memory used/total, 1-min load. no process names, no users, no files | 14 days |
+| box sample | with each heartbeat: CPU %, memory used/total, 1-min load, and grugbox own CPU, memory and pass time. no process names, no users, no files | 14 days |
+| token estimate | per minute, per bot, per model: model calls, input and output token counts. numbers only, no text | 90 days |
+| live sample | every 2 s, only while Live on: CPU %, memory | 15 minutes |
 | prompts | only when you ask (Edit prompt) | in database, never in repo |
 
 <details>
 <summary>log details</summary>
 
-- `collect-logs.sh` read new lines from `/var/log`, `/tmp`, tool caches, files running processes write, kernel log, journal, per-minute network summary, into `logs/box-logs.db` (SQLite). local copy kept 30 days, max 50 MB.
+- `grugbox` read new lines from `/var/log`, `/tmp`, tool caches, files running processes write, kernel log, journal, per-minute network summary, into `logs/box-logs.db` (SQLite). local copy kept 30 days, max 50 MB.
 - never read: shell histories, `.env` and token files, agent transcript content.
 - redaction catch things that look like token, password, key, JWT, URL with credentials. patterns miss some. check `ship-config.json` before allowing new source.
 - `ship-config.json` hold allow/deny lists and `catalog` (feed Logs page (i) tooltip).
 - loop run at lowest CPU and IO priority. it wake on faster of ship interval (15 s to 10 min) and heartbeat interval (30 s to 10 min), both default 1 min, both in Settings. box re-read settings at most every 5 min. lines only ship when ship interval due. nothing new = no request, just heartbeat.
-- CPU sample is `/proc/stat` difference since last pass. no extra process, no sleep.
+- CPU sample is `/proc/stat` difference since last sample. no extra process, no sleep. only first 8 fields count (guest time already inside user time, old code count it twice on VMs). sample after long gap (loop stopped) is dropped, not shown as one big average.
+- Box page chart is by time, not by sample number. gap in line = box off or loop stopped. faint line = peak per bucket, solid = average. memory shown as % of RAM.
+- grugbox also report itself: CPU (% of one core, includes the curl it run), peak memory, pass time. Box page show it in "Console agent" column.
 - top bar dot: green under 2 heartbeats since ping, amber until stale threshold (Settings, default 10 min), grey after. click dot for Box page.
 
 </details>
@@ -282,7 +322,7 @@ grug not snoop. box send only this:
 - every page and route behind Vercel Authentication. bot routes also need bearer token.
 - secrets only in Vercel env vars, database `config` table, box `.env`. never in repo.
 - scripts never print tokens. webhook errors hide key.
-- `confirm.sh` and `reply.sh` fail loud on any non-2xx or redirect, so broken bypass secret not fail quiet.
+- `grugbox confirm` and `grugbox reply` fail loud on any non-2xx or redirect, so broken bypass secret not fail quiet.
 - alert emails escape run text before it go in HTML. one email per run, never more (`runs.alerted_at`). demo never send email.
 
 ## Cost

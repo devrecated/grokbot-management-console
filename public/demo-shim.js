@@ -35,6 +35,12 @@
       if(tid) j.messages=[...j.messages,...vis.filter(x=>x.thread_id===tid)];
       return json(j);
     }
+    if(url.pathname==="/api/box/live"){  // fake live stream: a sample every 2 s from the browser
+      if(m==="POST"){ const u=body.on?Date.now()+5*60e3:0; sessionStorage.setItem("demo:live",u); return json({ok:true,live_until:u}); }
+      const u=Number(sessionStorage.getItem("demo:live")||0), since=Number(url.searchParams.get("since"))||0, rows=[];
+      if(u>Date.now()) for(let t=Math.max(since+2000,Date.now()-60e3); t<=Date.now(); t+=2000){ const b=Math.sin(t/20000)>0.7; rows.push({t,cpu:Math.round((b?30+Math.random()*40:3+Math.random()*6)*10)/10,mem:3100+Math.round(Math.random()*300+(b?1500:0)),tot:16000}); }
+      return json({live_until:u>Date.now()?u:0,rows});
+    }
     if(m!=="GET") return json({ok:true,demo:true,delivered:true});
     return real(input,init);
   };

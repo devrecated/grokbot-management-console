@@ -1,7 +1,7 @@
 // Box log ingest. Bearer ROUTINE_LOG_TOKEN (+ Vercel bypass header). Body: JSON array, optionally gzip (content-encoding: gzip).
 // Body: JSON array of rows, or {rows, catalog}. catalog (what is tracked/excluded) is stored in config key log_catalog for the /logs tooltip.
 // Keeps Neon small: retention from Settings (default 7 days) and a hard row cap, pruned on every ingest.
-import { sql, authed, ensureLogs, heartbeat } from "@/lib/db";
+import { sql, authed, ensureLogs, heartbeat, liveUntil } from "@/lib/db";
 import { gunzipSync } from "zlib";
 import { getSettings } from "@/lib/settings";
 export const dynamic="force-dynamic";
@@ -26,7 +26,7 @@ export async function POST(req){
   if(rows.length){ const keep=(await getSettings(q)).log_retention_days;
   await q`delete from logs where ts < now() - make_interval(days => ${keep})`;
   await q`delete from logs where id <= (select id from logs order by id desc offset ${MAX_ROWS} limit 1)`; }
-  return Response.json({ok:true,inserted:rows.length});
+  return Response.json({ok:true,inserted:rows.length,live_until:await liveUntil(q)});
 }
 
 // Dashboard read (Vercel Authentication protects it). All filters are server-side:

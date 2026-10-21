@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { tzLabel, SHORT } from "@/lib/tz";
 import Nav from "../nav";
 import Charts from "./charts";
+import Sessions, { Filters } from "./sessions";
 export const dynamic="force-dynamic";
 const RANGES={"1h":1,"6h":6,"24h":24,"7d":168,"14d":336};
 const dur=s=>{ s=Math.max(0,Math.round(s/60)); return s<60?`${s}m`:s<1440?`${Math.floor(s/60)}h ${s%60}m`:`${Math.floor(s/1440)}d ${Math.floor(s%1440/60)}h`; };
@@ -26,12 +27,12 @@ export default async function Box({searchParams}){
   const bw=Math.max(hb, Math.round((to-from)/1000/1500));
   const pts=await q`select floor(extract(epoch from ts)/${bw})*${bw} t, instance_id, avg(cpu)::real cpu, max(cpu)::real cpu_max, avg(100.0*mem_used_mb/nullif(mem_total_mb,0))::real mem
     from box_samples where ts >= to_timestamp(${from/1000}) and ts <= to_timestamp(${to/1000}) and (${inst}='' or instance_id=${inst}) group by 1,2 order by 1,2`;
-  const ses=all.filter(s=>(!inst||s.instance_id===inst)&&new Date(s.last_ping)>=from&&new Date(s.started)<=to).slice(0,50);
-  const ids=ses.map(s=>s.instance_id);
+  const ids=all.map(s=>s.instance_id);
   const bots=ids.length?await q`select h.instance_id, string_agg(distinct coalesce(b.name,e.bot), ', ') names, count(*)::int n from heartbeats h
       join bot_events e on e.ts between coalesce(h.boot_time,h.first_seen) and h.last_ping + interval '2 minutes' left join bots b on b.key=e.bot
       where h.instance_id = any(${ids}::text[]) group by 1`:[];
   const BT=Object.fromEntries(bots.map(b=>[b.instance_id,b]));
+  const sesAll=all.map(s=>({instance_id:s.instance_id,hostname:s.hostname,started:s.started,last_ping:s.last_ping,bots:BT[s.instance_id]||null}));
   const ag=cur?(await q`select cpu, mem_used_mb, mem_total_mb, agent_cpu, agent_rss_mb from box_samples where instance_id=${cur.instance_id} order by ts desc limit 1`)[0]:null;
   const o=cur?.os_info||{}, lu=await liveUntil(q), wait=Math.min(st.ship_interval_s,hb);
   const up=cur?(new Date(cur.last_ping)-new Date(cur.started))/1000:0;
@@ -52,19 +53,11 @@ export default async function Box({searchParams}){
     <div className="card">
       <div className="charthead"><b>CPU and memory</b>
         <span className="ranges">{Object.keys(RANGES).map(k=><a key={k} href={`/box${qs({r:k})}`} className={k===r?"on":""}>{k}</a>)}</span></div>
-      <form className="filters" method="get" action="/box">
-        <label>Session <select name="i" defaultValue={inst}><option value="">all</option>{all.slice(0,50).map(s=><option key={s.instance_id} value={s.instance_id}>{s.instance_id.slice(0,8)} · {fmt(s.started)}</option>)}</select></label>
-        <label>From <input type="date" name="from" defaultValue={sp.from||""}/></label><label>To <input type="date" name="to" defaultValue={sp.to||""}/></label>
-        {!custom&&<input type="hidden" name="r" value={r}/>}<button className="ghost">Apply</button>{(inst||custom)&&<a href="/box" style={{fontSize:13}}>clear</a>}</form>
+      <Filters sessions={all.map(x=>({instance_id:x.instance_id,started:String(x.started)}))} inst={inst} from={sp.from||""} to={sp.to||""} r={r} tz={tz}/>
       <Charts data={data} sess={sess} tz={tz} gap={2*bw} xr={[from/1000,to/1000]} bw={bw} initialUntil={lu} wait={wait}/>
       <div className="muted" style={{fontSize:12}}>Times in {tzLabel(tz)}. One point per {dur(bw)}{bw<120?` (${bw}s)`:""}, smoothed. Breaks = a new session, or no heartbeat for over {dur(2*bw)}. Faint line = peak CPU.</div>
     </div></>}
     <div className="card"><b>Sessions</b> <span className="muted">a boot, or a wake after the box slept · {fmt(from)} to {custom?fmt(to):"now"}</span>
-    <table className="compact"><thead><tr><th>Session</th><th>Start</th><th>End</th><th>Duration</th><th>Bots</th></tr></thead><tbody>
-      {ses.map(s=>{ const b=BT[s.instance_id], live=s===cur&&fresh;
-        return <tr key={s.instance_id}><td><a href={`/box${qs({i:s.instance_id,r:custom?"":r,from:sp.from,to:sp.to})}`}><code>{s.instance_id.slice(0,8)}</code></a></td><td>{fmt(s.started)}</td><td>{live?"now":fmt(s.last_ping)}</td><td>{dur((new Date(s.last_ping)-new Date(s.started))/1000)}</td>
-          <td style={{fontSize:13}}>{b?<>{b.names} <span className="muted">· {b.n} actions</span></>:<span className="muted">none</span>}</td></tr>; })}
-      {!ses.length&&<tr><td colSpan={5} className="muted">No sessions in this window.</td></tr>}
-    </tbody></table></div>
+    <Sessions sessions={JSON.parse(JSON.stringify(sesAll))} inst={inst} win={[from,to]} tz={tz} cur={cur?.instance_id} fresh={!!fresh} params={{r:custom?"":r,from:sp.from||"",to:sp.to||""}}/></div>
   </main></>;
 }

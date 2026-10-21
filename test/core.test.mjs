@@ -7,3 +7,9 @@ test("box page lists sessions",async()=>{ const h=await (await get("/box?r=7d"))
 test("settings api",async()=>{ const j=await (await get("/api/settings")).json(); assert.equal(typeof j.timezone,"string"); assert.equal(typeof j.plugins,"object"); });
 test("unknown plugin is 404",async()=>{ assert.equal((await get("/api/p/nope/x")).status,404); });
 test("demo writes are fake",async()=>{ const j=await (await fetch(B+"/api/settings",{method:"POST",body:"{}"})).json(); assert.equal(j.demo,true); });
+test("box session filter drives the sessions table",async()=>{
+  const all=await (await get("/box?r=14d")).text(), one=await (await get("/box?r=14d&i=a1b2c3d4e5f60718")).text();
+  assert.match(all,/6<!-- --> of <!-- -->6<!-- --> <!-- -->sessions/); assert.match(one,/1<!-- --> of <!-- -->1<!-- --> <!-- -->sessions/); });
+test("routines, runs, usage and chat use the shared table",async()=>{
+  for(const p of ["/","/usage","/chat"]) assert.match(await (await get(p)).text(),/class="lv gtt"/); });
+test("wake state",async()=>{ const j=await (await get("/api/box/wake")).json(); assert.ok(["sleeping","waking","awake"].includes(j.state)); });

@@ -77,3 +77,11 @@ pre.taskout{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:6px
 .pill.expired{background:#e5e7eb;color:#374151}
 .pill.done{background:#dcfce7;color:#166534}.pill.failed{background:#fee2e2;color:#991b1b}.pill.running{background:#dbeafe;color:#1e40af}.pill.queued{background:#fef3c7;color:#92400e}
 .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:13px;margin-top:8px}
+.gtt{font:13px system-ui,-apple-system,"Segoe UI",sans-serif;table-layout:fixed}.gtt td{padding:6px 8px;vertical-align:top;overflow:hidden;text-overflow:ellipsis}.gtt th{padding:7px 8px;text-align:left;font-weight:600}
+.gtt tr.subrow td{background:#fafbfc}.gtt tr.subrow td:nth-child(2){padding-left:22px}.gt-sub{background:#f8fafc!important;cursor:default;white-space:normal}
+.gtt tfoot td{background:#f3f4f6;font-weight:600;padding:7px 8px}.gt{margin-bottom:18px}.gt h3{margin:0}
+.chat-full{grid-template-columns:340px 1fr}.gt-threads{background:none;border:0;overflow:visible}.gt-threads div{padding:0;border-bottom:0;cursor:auto}.gt-threads .lv-wrap{border:1px solid #e3e6ea}
+.gt-threads .lv-bar input{width:150px!important}.gtt tr.sel td{background:#eef1f6}
+button.wake{display:inline-flex;gap:6px;align-items:center;background:#2b3345;color:#fff;border:1px solid #3d475c;padding:3px 10px;font-size:12px;border-radius:14px}
+button.wake.awake{background:transparent}button.wake:disabled{opacity:.85;cursor:wait}
+.spin{width:10px;height:10px;border:2px solid #9aa4b8;border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}

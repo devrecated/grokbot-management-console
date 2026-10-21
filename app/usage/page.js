@@ -3,6 +3,7 @@
 import { sql, ensure, ensureBots } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import Nav from "../nav";
+import UsageTable from "./table";
 export const dynamic="force-dynamic";
 const RANGES={"7":7,"30":30,"90":90};
 function TokCells({t,fmtT,money,anyPrice,bold}){
@@ -40,17 +41,17 @@ export default async function Usage({searchParams}){
   for(const b of Object.keys(T)) bots[b]??={bot:b,n:0,err:0,timed:0,secs:0,routines:[]};
   const est=(n,secs,a)=>n*s.cost_per_run+secs/60*s.cost_per_run_minute+a*s.cost_per_action;
   const list=Object.values(bots).sort((a,b)=>b.n-a.n), total=list.reduce((t,b)=>t+est(b.n,b.secs,A[b.bot]||0),0);
+  const tk=t=>t?{calls:{v:t.calls,t:String(t.calls)},tok:{v:t.input+t.output,t:`${fmtT(t.input)} / ${fmtT(t.output)}`},tcost:{v:t.cost??0,t:t.cost!=null&&t.priced!==false?"~"+money(t.cost):"no price"}}:{calls:"-",tok:"-",tcost:"-"};
+  const row=(id,name,n,err,secs,timed,acts,est,t,subRows)=>({id,name,n,err:err||"",mins:{v:secs,t:mins(secs,timed,n)},acts,est:{v:est,t:"~"+money(est)},...tk(t),subRows});
   const mins=(secs,timed,n)=>timed?`${(secs/60).toFixed(1)}${timed<n?` (${timed}/${n} runs timed)`:""}`:"-";
-  return <><Nav active="usage"/><main><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h2>Cost &amp; usage</h2>
+  const rows=list.map(b=>row(b.bot,b.bot,b.n,b.err,b.secs,b.timed,A[b.bot]??0,est(b.n,b.secs,A[b.bot]||0),T[b.bot],
+    b.routines.map(r=>row(r.routine_id,r.name,r.n,r.err,r.secs,r.timed,"-",est(r.n,r.secs,0),RT[r.routine_id]))));
+  return <><Nav active="usage"/><main style={{maxWidth:1400}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h2>Cost &amp; usage</h2>
       <span className="tabs-mini">{Object.keys(RANGES).map(d=><a key={d} href={`/usage?days=${d}`} className={Number(d)===days?"on":""}>{d} days</a>)}</span></div>
     <div className="warnbox" style={{background:"#eef4ff",borderColor:"#a8c3f0"}}><b>Where these numbers come from.</b> Grok Bot does not tell the box what a run costs or how many tokens it used, so there is no real bill here.
       Counted: <b>runs</b> (from log-run.sh), <b>run minutes</b> (only when log-run.sh gets the optional 5th argument, seconds), and <b>actions</b> (bot activity, kept 7 days).
       {rated?<> The <b>estimate</b> column multiplies those by your rates in <a href="/settings">Settings</a>: {money(s.cost_per_run)}/run, {money(s.cost_per_run_minute)}/run minute, {money(s.cost_per_action)}/action.</>:<> Set rates in <a href="/settings">Settings</a> to see an estimate.</>}</div>
-    {!list.length&&<p className="muted">No runs or actions in the last {days} days.</p>}
-    {list.length>0&&<table><thead><tr><th>Bot / routine</th><th>Runs</th><th>Failed</th><th>Run minutes</th><th>Actions</th>{rated&&<th>Estimate</th>}{anyTok&&<><th>Model calls</th><th>Tokens in / out</th>{anyPrice&&<th>Token cost <span className="muted">(estimated from transcripts)</span></th>}</>}</tr></thead><tbody>
-      {list.map(b=>[<tr key={b.bot} style={{background:"#f6f7f9"}}><td><b>{b.bot}</b></td><td><b>{b.n}</b></td><td>{b.err||""}</td><td>{mins(b.secs,b.timed,b.n)}</td><td>{A[b.bot]??0}</td>{rated&&<td><b>~{money(est(b.n,b.secs,A[b.bot]||0))}</b></td>}{anyTok&&<TokCells t={T[b.bot]} fmtT={fmtT} money={money} anyPrice={anyPrice} bold/>}</tr>,
-        ...b.routines.map(r=><tr key={b.bot+r.routine_id}><td style={{paddingLeft:24}}>{r.name}<div className="muted">{r.routine_id}</div></td><td>{r.n}</td><td>{r.err||""}</td><td>{mins(r.secs,r.timed,r.n)}</td><td className="muted" title="Actions are counted per bot, not per routine">-</td>{rated&&<td>~{money(est(r.n,r.secs,0))}</td>}{anyTok&&<TokCells t={RT[r.routine_id]} fmtT={fmtT} money={money} anyPrice={anyPrice}/>}</tr>)])}
-      {rated&&<tr><td colSpan={5} style={{textAlign:"right"}}><b>Total estimate, last {days} days</b></td><td><b>~{money(total)}</b></td></tr>}</tbody></table>}
+    <UsageTable rows={rows} rated={rated} anyTok={anyTok} anyPrice={anyPrice} total={money(total)} days={days}/>
     <p className="muted" style={{fontSize:12}}>Estimate only. Check your real bill with your provider.</p>
     <div className="muted" style={{fontSize:12}}><b>Tokens are estimated from transcripts.</b> The box counts transcript bytes (about {3.9} bytes per token, measured against the o200k tokenizer) for each model call:
       input = system prompt + everything earlier in the conversation, output = the reply. It ignores prompt caching and hidden tool context, so treat it as a rough size, not a bill.

@@ -1,48 +1,44 @@
 "use client";
-import { useState, useEffect } from "react";
+// One routine in the Routines table: Controls (cell) and Editor (expanded row) share state kept by the table (ui).
+import { useState } from "react";
 import { DAYS, build, isEvent } from "./schedule";
 import PromptEditor from "./prompt-editor";
-export default function RoutineRow({r, last}){
-  const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[note,setNote]=useState("");
-  const [pending,setPending]=useState(r.pending_action);
-  const [s,setS]=useState({freq:"weekdays",time:"08:00",days:[1],dom:1,n:15,minute:0,cron:"",date:"",timing:"exact"});
-  const [trig,setTrig]=useState(""),[edit,setEdit]=useState(false),[asked,setAsked]=useState(false);
-  useEffect(()=>{setPending(r.pending_action);},[JSON.stringify(r.pending_action)]);
-  const event=isEvent(r.schedule_or_trigger);
+export async function act(r,body,patch){
+  patch({busy:true,note:""});
+  const res=await fetch("/api/actions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routine_id:r.routine_id,...body})});
+  const j=await res.json().catch(()=>({}));
+  if(!res.ok) return patch({busy:false,note:"Error: "+(j.error||res.status)});
+  if(j.cancelled) return patch({busy:false,pending:null,note:"Cancelled"});
+  if(j.fetching) return patch({busy:false,asked:true,note:j.delivered?"Asked the bot for its prompt…":"Saved, not delivered"+(j.reason?` (${j.reason})`:"")});
+  patch({busy:false,pending:j.pending,mode:null,note:j.delivered?"Sent to Grok Bot":"Saved, not delivered"+(j.reason?` (${j.reason})`:"")});
+}
+export function Controls({r,u,patch}){
+  const pending=u.pending, paused=r.status==="paused", event=isEvent(r.schedule_or_trigger), busy=u.busy;
+  const toggle=m=>patch({mode:u.mode===m?null:m});
+  return <div onClick={e=>e.stopPropagation()} style={{whiteSpace:"nowrap"}}>
+    {pending?<div><span className="pending">Pending: {pending.human||pending.action}</span> <button className="link" disabled={busy} onClick={()=>act(r,{action:"cancel"},patch)}>cancel</button></div>:<>
+    <button disabled={busy} onClick={()=>act(r,{action:paused?"resume":"pause",human:paused?"Resume routine":"Pause routine"},patch)}>{paused?"Resume":"Pause"}</button>{" "}
+    <button disabled={busy} className={u.mode==="schedule"?"":"ghost"} onClick={()=>toggle("schedule")}>{event?"Trigger…":"Schedule"}</button>{" "}
+    <button disabled={busy} className={u.mode==="prompt"?"":"ghost"} onClick={()=>{ if(!r.prompt_text&&!u.asked) act(r,{action:"fetch_prompt"},patch); toggle("prompt"); }}>Prompt</button>{" "}
+    <a href={`/chat?thread=${encodeURIComponent("routine:"+r.routine_id)}`} style={{fontSize:12}}>chat</a></>}
+    {u.note&&<div className="muted" style={{fontSize:12}}>{u.note}</div>}</div>;
+}
+export function Editor({r,u,patch}){
+  const busy=u.busy, event=isEvent(r.schedule_or_trigger), setOpen=()=>patch({mode:null});
+  const [s,setS]=useState({freq:"weekdays",time:"08:00",days:[1],dom:1,n:15,minute:0,cron:"",date:"",timing:"exact"}), [trig,setTrig]=useState("");
   const b=build(s,r.tzl);
-  const paused=r.status==="paused";
-  async function act(body){
-    setBusy(true); setNote("");
-    const res=await fetch("/api/actions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routine_id:r.routine_id,...body})});
-    const j=await res.json().catch(()=>({})); setBusy(false);
-    if(!res.ok){ setNote("Error: "+(j.error||res.status)); return; }
-    if(j.cancelled){ setPending(null); setNote("Cancelled"); return; }
-    if(j.fetching){ setAsked(true); setNote(j.delivered?"Asked the bot for its prompt…":"Saved, not delivered"+(j.reason?` (${j.reason})`:"")); return; }
-    if(body.action==="set_prompt") setEdit(false);
-    setPending(j.pending); setOpen(false); setNote(j.delivered?"Sent to Grok Bot":"Saved, not delivered"+(j.reason?` (${j.reason})`:""));
-  }
+  if(u.mode==="prompt") return <PromptEditor r={r} fetching={(u.asked||(r.prompt_requested_at&&Date.now()-new Date(r.prompt_requested_at)<600000))&&!r.prompt_text}
+      busy={busy} onSave={p=>act(r,{action:"set_prompt",prompt:p},patch)} onRefetch={()=>act(r,{action:"fetch_prompt"},patch)} onClose={setOpen}/>;
+  const act2=body=>act(r,body,patch);
   const set=(k,v)=>setS(x=>({...x,[k]:v}));
   const chip=d=>{const on=s.days.includes(d);return <button key={d} type="button" onClick={()=>set("days",on?s.days.filter(x=>x!==d):[...s.days,d])}
     style={{background:on?"#1d2330":"#fff",color:on?"#fff":"#1d2330",padding:"3px 8px"}}>{DAYS[d]}</button>;};
   const showTime=["daily","weekdays","weekly","monthly","once"].includes(s.freq);
-  return <><tr>
-    <td>{r.name}<div className="muted">{r.routine_id}</div></td>
-    <td>{r.schedule_or_trigger}{paused&&<div><span className="badge-paused">Paused</span></div>}</td>
-    <td>{r.purpose}</td>
-    <td>{last?<><span className={last.status}>{last.status}</span> {last.when}</>:<span className="muted">never</span>}</td>
-    <td style={{whiteSpace:"nowrap"}}>
-      {pending?<div><span className="pending">Pending: {pending.human||pending.action}</span> <button className="link" disabled={busy} onClick={()=>act({action:"cancel"})}>cancel</button></div>:<>
-      <button disabled={busy} onClick={()=>act({action:paused?"resume":"pause",human:paused?"Resume routine":"Pause routine"})}>{paused?"Resume":"Pause"}</button>{" "}
-      <button disabled={busy} className="ghost" onClick={()=>setOpen(o=>!o)}>{event?"Trigger…":"Edit schedule"}</button>{" "}<button disabled={busy} className="ghost" onClick={()=>{ if(!r.prompt_text&&!asked) act({action:"fetch_prompt"}); setEdit(e=>!e); }}>Edit prompt</button>{" "}<a href={`/chat?thread=${encodeURIComponent("routine:"+r.routine_id)}`} style={{fontSize:12}}>Open chat</a></>}
-      {note&&<div className="muted" style={{fontSize:12}}>{note}</div>}
-    </td></tr>
-    {edit&&!pending&&<tr><td colSpan={5} className="editor"><PromptEditor r={r} fetching={(asked||(r.prompt_requested_at&&Date.now()-new Date(r.prompt_requested_at)<600000))&&!r.prompt_text}
-      busy={busy} onSave={p=>act({action:"set_prompt",prompt:p})} onRefetch={()=>act({action:"fetch_prompt"})} onClose={()=>setEdit(false)}/></td></tr>}
-    {open&&!pending&&<tr><td colSpan={5} className="editor">
+  return <div className="editor">
       {event?<div>
         <div><b>Trigger:</b> <span className="muted">{r.schedule_or_trigger} (event-triggered; read-only)</span></div>
         <textarea style={{width:"100%",marginTop:6}} rows={2} placeholder="Describe the trigger change you want (e.g. 'Also run when a PR is merged in my-org/site')" value={trig} onChange={e=>setTrig(e.target.value)}/>
-        <button disabled={busy||!trig.trim()} onClick={()=>act({action:"change_trigger",trigger_request:trig,human:`Change trigger: ${trig.slice(0,120)}`})}>Request trigger change</button>
+        <button disabled={busy||!trig.trim()} onClick={()=>act2({action:"change_trigger",trigger_request:trig,human:`Change trigger: ${trig.slice(0,120)}`})}>Request trigger change</button>
       </div>:<div className="filters" style={{alignItems:"center"}}>
         <select value={s.freq} onChange={e=>set("freq",e.target.value)}>
           <option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option>
@@ -57,8 +53,8 @@ export default function RoutineRow({r, last}){
         <span className="muted">Timezone: {r.tzl||"ET"}</span>
         <select value={s.timing} onChange={e=>set("timing",e.target.value)}><option value="exact">Exact time</option><option value="flexible">Flexible (± a few min)</option></select>
         <div style={{flexBasis:"100%"}}><b>{b.human}</b>{b.cron&&<code className="muted"> {b.cron}</code>}</div>
-        <button disabled={busy||!/^\S+ \S+ \S+ \S+ \S+$/.test(b.cron)} onClick={()=>act({action:"set_schedule",schedule:b.cron,timing:s.timing,human:b.human+(s.timing==="flexible"?" (flexible)":"")})}>Request change</button>
+        <button disabled={busy||!/^\S+ \S+ \S+ \S+ \S+$/.test(b.cron)} onClick={()=>act2({action:"set_schedule",schedule:b.cron,timing:s.timing,human:b.human+(s.timing==="flexible"?" (flexible)":"")})}>Request change</button>
         <button className="ghost" onClick={()=>setOpen(false)}>Close</button>
       </div>}
-    </td></tr>}</>;
+    </div>;
 }

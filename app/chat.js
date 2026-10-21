@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
+import GrugTable from "./grug-table";
 import { tzLabel } from "@/lib/tz";
 export default function Chat({routines,alwaysChat,tz="America/New_York"}){
   const fmt=d=>new Date(d).toLocaleString("en-US",{timeZone:tz,month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})+" "+tzLabel(tz);
@@ -23,11 +24,15 @@ export default function Chat({routines,alwaysChat,tz="America/New_York"}){
     else setNote("Error: "+(j.error||r.status));
   }
   const cur=threads.find(t=>t.thread_id===tid);
+  const pickT=t=>{ setTid(t); if(!t) setMsgs([]); history.replaceState(null,"",t?"/chat?thread="+encodeURIComponent(t):"/chat"); };
+  const tcols=useMemo(()=>[
+    {id:"th",header:"Thread",accessorFn:t=>t.thread_id.startsWith("routine:")?(t.routine_id||t.thread_id.slice(8)):t.first_text,size:190,cell:({row:{original:t}})=><><div style={{whiteSpace:"normal"}}>{t.thread_id.startsWith("routine:")?<b>{t.routine_id||t.thread_id.slice(8)}</b>:(t.first_text||"").slice(0,60)}</div><div className="muted" style={{fontSize:11}}>{t.bot||"Any bot"}</div></>},
+    {id:"last",header:"Last",accessorFn:t=>+new Date(t.last_at),size:110,cell:({row})=><span className="muted" style={{fontSize:11}}>{fmt(row.original.last_at)}</span>},
+  ],[tz]);
   return <div className="chat chat-full">
-    <div className="threads"><div className={!tid?"sel":""} onClick={()=>{setTid(null);setMsgs([]);history.replaceState(null,"","/chat");}}><b>+ New thread</b></div>
-      {Object.entries(threads.reduce((m,t)=>((m[t.bot||"Any bot"]??=[]).push(t),m),{})).map(([b,ts])=><div key={b} className="tgroup"><div className="tg-h">{b}</div>
-        {ts.map(t=><div key={t.thread_id} className={t.thread_id===tid?"sel":""} onClick={()=>{setTid(t.thread_id);history.replaceState(null,"","/chat?thread="+encodeURIComponent(t.thread_id));}}>
-          <div>{t.thread_id.startsWith("routine:")?<b>{t.routine_id||t.thread_id.slice(8)}</b>:t.first_text.slice(0,40)}</div><div className="muted">{fmt(t.last_at)}</div></div>)}</div>)}</div>
+    <div className="threads gt-threads"><GrugTable data={threads} columns={tcols} rowId={t=>t.thread_id} sort={[{id:"last",desc:true}]} pinKey="threadPins" noun="threads" placeholder="Search threads"
+      search={t=>`${t.thread_id} ${t.bot||""} ${t.routine_id||""} ${t.first_text||""}`} onRow={t=>pickT(t.thread_id)} rowClass={t=>t.thread_id===tid?"sel":""} height="calc(100vh - 230px)"
+      toolbar={<button className={!tid?"":"ghost"} onClick={()=>pickT(null)}>+ New</button>} empty="No threads yet."/></div>
     <div className="pane">
       <div className="msgs">{!tid&&<p className="muted">Start a new thread. Pick a bot and routine to point Grok Bot at it.</p>}
         {msgs.map(m=><div key={m.id} className={`msg ${m.role}`}>{m.text}<div className="muted" style={{fontSize:11}}>{m.role==="user"?"You":"Grok Bot"} · {fmt(m.created_at)}{m.role==="user"&&m.delivered===false?" · not delivered":""}</div></div>)}<div ref={end}/></div>

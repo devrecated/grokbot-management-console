@@ -40,6 +40,15 @@ if [ ! -x "$gb" ] || ! "$gb" version >/dev/null 2>&1; then
   else echo "grugbox: no prebuilt binary for $(uname -m) and no cargo. Install Rust (https://rustup.rs) and run install.sh again." >&2; exit 4; fi
 fi
 if ! cmp -s "$gb" "$INSTALL_DIR/grugbox"; then cp "$gb" "$INSTALL_DIR/.grugbox.tmp" && chmod 700 "$INSTALL_DIR/.grugbox.tmp" && mv -f "$INSTALL_DIR/.grugbox.tmp" "$INSTALL_DIR/grugbox"; gbnew=1; fi
+# Task allowlist: each plugin's tasks/ goes to $INSTALL_DIR/tasks/<plugin>/. Only what is here can run on this box.
+# A plugin removed from the repo loses its folder here too.
+if [ -d "$SRC/../plugins" ]; then
+  mkdir -p "$INSTALL_DIR/tasks"
+  for d in "$SRC"/../plugins/*/tasks; do [ -f "$d/tasks.json" ] || continue; n="$(basename "$(dirname "$d")")"
+    rm -rf "$INSTALL_DIR/tasks/.$n.tmp"; cp -r "$d" "$INSTALL_DIR/tasks/.$n.tmp"; chmod 700 "$INSTALL_DIR/tasks/.$n.tmp"/*.sh 2>/dev/null || true
+    rm -rf "$INSTALL_DIR/tasks/$n"; mv "$INSTALL_DIR/tasks/.$n.tmp" "$INSTALL_DIR/tasks/$n"; done
+  for d in "$INSTALL_DIR"/tasks/*/; do n="$(basename "$d")"; [ -d "$SRC/../plugins/$n/tasks" ] || rm -rf "$d"; done
+fi
 [ -f "$INSTALL_DIR/env.example" ] || cp "$SRC/env.example" "$INSTALL_DIR/env.example" 2>/dev/null || true
 mkdir -p "$INSTALL_DIR/logs"; chmod 700 "$INSTALL_DIR/logs"; rm -f "$INSTALL_DIR/logs/.interval"  # old single-interval cache, now logs/.settings
 find "$INSTALL_DIR/logs" -type f -exec chmod 600 {} + 2>/dev/null || true
@@ -54,6 +63,11 @@ for k in ROUTINE_LOG_URL ROUTINE_LOG_TOKEN VERCEL_BYPASS; do
     else missing+=("$k"); fi
   fi
 done
+# TASK_KEY signs worker tasks. Made here once if missing (never printed); put the same value in the dashboard env.
+if ! grep -q '^TASK_KEY=.' "$ENVF"; then
+  if [ -n "${TASK_KEY:-}" ]; then printf 'TASK_KEY=%s\n' "$TASK_KEY" >> "$ENVF"
+  else printf 'TASK_KEY=%s\n' "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" >> "$ENVF"; echo "made a TASK_KEY in $ENVF: copy it to the dashboard env as TASK_KEY to turn on tasks"; fi
+fi
 if [ "${#missing[@]}" -gt 0 ]; then echo "missing: ${missing[*]}  (set them as env vars or in $ENVF, then run install.sh again)" >&2; exit 3; fi
 
 # (only after .env is complete, so a failed check never leaves the loop stopped)

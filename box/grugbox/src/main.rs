@@ -10,6 +10,13 @@
 //   grugbox logs [-s source] [-l level] [-t 1h|6h|24h|7d] [-g text] [-n 50]   (reads the server, the only log store)
 //   grugbox sample          print one CPU/memory sample (JSON)
 //   grugbox live <until_epoch_s>   stream CPU/memory every 2 s until then (started by the loop when Live is on)
+//   grugbox flush           send every spooled batch now
+//   grugbox tasks           list the tasks this box allows (tasks/<plugin>/tasks.json)
+// Sessions: one per run of the box, a boot or a wake after the VM was paused. The instance id is
+// sha256(machine-id, boot_id, wake start), so a wake gets a fresh id. Wakes are seen as /proc/stat btime jumping forward.
+// Tasks: the server hands one queued run back on a normal ship. It runs only if the HMAC (TASK_KEY in .env) checks out,
+// it has not expired, its nonce is new, the task is in this box's allowlist and its args pass their types. Then it runs
+// niced with a timeout, no shell of our own around it, and its output is redacted and sent about every second.
 // Data rules: logs are redacted twice; bot activity is tool names and times only; tokens are byte-count estimates;
 // agent transcripts, shell histories, .env and token files never leave the box. HTTP goes through the system curl.
 use regex::Regex;
@@ -336,13 +343,26 @@ fn cpu_now() -> Option<(u64, u64)> {
     let f: Vec<u64> = read("/proc/stat").lines().next()?.split_whitespace().skip(1).take(8).filter_map(|x| x.parse().ok()).collect();
     if f.len() < 5 { None } else { Some((f[3] + f[4], f.iter().sum())) }
 }
+// Start of this run of the box. A VM pause stops guest uptime but not the wall clock, so on resume /proc/stat btime
+// jumps forward by the time asleep (boot_id stays the same). A jump over 30 s = a wake: new start, and the sleep length
+// is kept in logs/.slept for the next sample. logs/.wake = "boot_id start", logs/.btime = "boot_id btime".
+fn wake_start(boot: &str) -> u64 {
+    let bt: u64 = read("/proc/stat").lines().find_map(|l| l.strip_prefix("btime ").and_then(|x| x.trim().parse().ok())).unwrap_or(0);
+    let pair = |f: &str| -> Option<u64> { let s = read(logs().join(f)); let (b, v) = s.trim().split_once(' ')?; if b == boot { v.parse().ok() } else { None } };
+    let _ = fs::create_dir_all(logs());
+    let mut start = pair(".wake").unwrap_or(bt);
+    if let Some(prev) = pair(".btime") { if bt > prev + 30 { start = now() as u64; let _ = fs::write(logs().join(".slept"), (bt - prev).to_string()); } }
+    if pair(".btime") != Some(bt) { let _ = fs::write(logs().join(".btime"), format!("{} {}", boot, bt)); }
+    if pair(".wake") != Some(start) { let _ = fs::write(logs().join(".wake"), format!("{} {}", boot, start)); }
+    start
+}
 fn instance() -> Value {
     let rd = |p: &str| read(p).trim().to_string();
     let boot = rd("/proc/sys/kernel/random/boot_id"); let mut mid = rd("/etc/machine-id"); if mid.is_empty() { mid = rd("/var/lib/dbus/machine-id"); }
-    let btime: u64 = read("/proc/stat").lines().find_map(|l| l.strip_prefix("btime ").and_then(|x| x.trim().parse().ok())).unwrap_or(0);
+    let start = wake_start(&boot);
     let host = trunc(&rd("/proc/sys/kernel/hostname"), 64); let v = trunc(&rd(&dir().join("VERSION").to_string_lossy()), 40);
-    json!({"machine_id": &sha_hex(&format!("grugbot-machine:{}", mid))[..16], "instance_id": &sha_hex(&format!("grugbot:{}:{}", boot, mid))[..16],
-        "hostname": host, "boot_time": btime, "version": if v.is_empty() { "dev".to_string() } else { v }})
+    json!({"machine_id": &sha_hex(&format!("grugbot-machine:{}", mid))[..16], "instance_id": &sha_hex(&format!("grugbot:{}:{}:{}", boot, mid, start))[..16],
+        "hostname": host, "boot_time": start, "version": if v.is_empty() { "dev".to_string() } else { v }})
 }
 fn os_info() -> Value {
     let distro = read("/etc/os-release").lines().find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|x| x.trim_matches('"').to_string())).unwrap_or("Linux".into());
@@ -363,11 +383,8 @@ fn sample(max_gap: f64) -> Value {
     let m = meminfo(); let tot = m.get("MemTotal").copied().unwrap_or(0) / 1024;
     let load: f64 = read("/proc/loadavg").split_whitespace().next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
     let (ac, rss) = agent_self(t);
-    // VM pause/resume (no reboot): guest uptime stops while paused, wall clock jumps on resume, so btime moves forward
-    // by the time asleep. boot_id stays the same, so it is the same session with a sleep in it.
-    let bt: f64 = read("/proc/stat").lines().find_map(|l| l.strip_prefix("btime ").and_then(|x| x.trim().parse().ok())).unwrap_or(0.0);
-    let bp = logs().join(".btime"); let prev_bt: f64 = read(&bp).trim().parse().unwrap_or(bt); let _ = fs::write(&bp, bt.to_string());
-    let slept = if bt - prev_bt > 30.0 { json!(bt - prev_bt) } else { Value::Null };
+    // seconds asleep right before this run started (see wake_start), sent once
+    let sp = logs().join(".slept"); let slept = read(&sp).trim().parse::<f64>().ok().map_or(Value::Null, |x| json!(x)); let _ = fs::remove_file(&sp);
     json!({"cpu": pct, "mem_used_mb": tot - m.get("MemAvailable").copied().unwrap_or(0) / 1024, "mem_total_mb": tot, "load1": (load * 100.0).round() / 100.0,
         "agent_cpu": ac, "agent_rss_mb": rss, "slept_s": slept})
 }
@@ -405,7 +422,7 @@ fn glob_match(p: &str, s: &str) -> bool {
 }
 fn due(p: &Path, secs: u64) -> bool { fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).map_or(true, |e| e.as_secs() + 3 >= secs) }
 // Collect + send when the ship interval is due; heartbeat (with a CPU/memory sample) when that is due. Unsent = spool.
-fn ship(st: &mut St, pass_ms: u64) {
+fn ship(st: &mut St, pass_ms: u64) -> Option<Value> {
     let cfg: Value = serde_json::from_str(&read(dir().join("ship-config.json"))).unwrap_or(json!({"allow":["*"],"deny":[]}));
     let arr = |k: &str| cfg[k].as_array().cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>();
     let (allow, deny_) = (arr("allow"), arr("deny"));
@@ -415,7 +432,9 @@ fn ship(st: &mut St, pass_ms: u64) {
     let hb = logs().join(".heartbeat"); let stale = due(&hb, hb_s); let shp = logs().join(".shipped"); let ship_due = due(&shp, ship_s);
     let flushed = spool_flush();
     let rows = if ship_due { collect(st) } else { Vec::new() };
-    if rows.is_empty() && !send_cat && !stale { return; }
+    let tcat = json!(task_defs().iter().map(|(p, d, _)| { let mut d = d.clone(); d.as_object_mut().map(|o| o.remove("script")); d["plugin"] = json!(p); d }).collect::<Vec<_>>());
+    let tcs = sha_hex(&tcat.to_string()); let send_tasks = st.get("tasks_sent").as_deref() != Some(tcs.as_str());
+    if rows.is_empty() && !send_cat && !stale && !send_tasks { return None; }
     let off = off_str();
     let batch: Vec<Value> = rows.iter().filter(|r| ok(&r.1)).map(|r| {
         let head: String = r.3.chars().take(80).collect();
@@ -426,17 +445,20 @@ fn ship(st: &mut St, pass_ms: u64) {
     let send_os = st.get("os_sent").as_deref() != Some(iid.as_str());
     if send_os { inst["os"] = os_info(); }
     let chunks: Vec<&[Value]> = if batch.is_empty() { vec![&[][..]] } else { batch.chunks(BATCH).collect() };
-    let mut sent = 0;
+    let (mut sent, mut task) = (0, None);
     for (n, ch) in chunks.iter().enumerate() {
         let mut body = json!({"instance": if n == 0 { inst.clone() } else { instance() }, "rows": ch});
         if n == 0 && send_cat { body["catalog"] = cfg["catalog"].clone(); }
+        if n == 0 && send_tasks { body["tasks"] = tcat.clone(); }
         // spool only if earlier batches went out (keeps order) or nothing is waiting; never spool a bare heartbeat
         match if flushed { send("logs", &body, !ch.is_empty()) } else { if !ch.is_empty() { body["instance"].as_object_mut().map(|o| o.remove("sample")); spool_put("logs", &gz(&body)); } None } {
             Some(res) => {
                 sent += ch.len();
                 if n == 0 {
-                    if send_os { st.set("os_sent", &iid); } if send_cat { st.set("catalog_sent", &cat); }
-                    let lu = serde_json::from_str::<Value>(&res).ok().and_then(|v| v["live_until"].as_f64()).unwrap_or(0.0);
+                    if send_os { st.set("os_sent", &iid); } if send_cat { st.set("catalog_sent", &cat); } if send_tasks { st.set("tasks_sent", &tcs); }
+                    let rv: Value = serde_json::from_str(&res).unwrap_or(Value::Null);
+                    if rv["task"].is_object() { task = Some(rv["task"].clone()); }
+                    let lu = rv["live_until"].as_f64().unwrap_or(0.0);
                     if lu / 1000.0 > now() { start_live((lu / 1000.0) as u64); }
                 }
             }
@@ -446,6 +468,97 @@ fn ship(st: &mut St, pass_ms: u64) {
     if stale { let _ = fs::write(&hb, ""); }
     if ship_due { let _ = fs::write(&shp, ""); }
     println!("shipped {} of {} new lines{}", sent, rows.len(), if sent < batch.len() { " (rest spooled)" } else { "" });
+    task
+}
+
+// ---------- worker tasks ----------
+// The allowlist: tasks/<plugin>/tasks.json next to this binary (install.sh copies them from plugins/*/tasks/).
+fn task_defs() -> Vec<(String, Value, PathBuf)> {
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(dir().join("tasks")) else { return out };
+    let mut ds: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect(); ds.sort();
+    for d in ds {
+        let v: Value = serde_json::from_str(&read(d.join("tasks.json"))).unwrap_or(Value::Null);
+        for t in v["tasks"].as_array().cloned().unwrap_or_default() {
+            let (Some(name), Some(sc)) = (t["name"].as_str(), t["script"].as_str()) else { continue };
+            let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) && !s.starts_with('.');
+            if !ok(name) || !ok(sc) || out.iter().any(|(_, x, _): &(String, Value, PathBuf)| x["name"] == t["name"]) { continue; }
+            out.push((d.file_name().unwrap_or_default().to_string_lossy().into_owned(), t.clone(), d.join(sc)));
+        }
+    }
+    out
+}
+fn hmac(key: &[u8], msg: &[u8]) -> String {
+    let mut k = [0u8; 64];
+    if key.len() > 64 { k[..32].copy_from_slice(&Sha256::digest(key)); } else { k[..key.len()].copy_from_slice(key); }
+    let (mut i, mut o) = (Sha256::new(), Sha256::new());
+    i.update(k.map(|b| b ^ 0x36)); i.update(msg); o.update(k.map(|b| b ^ 0x5c)); o.update(i.finalize());
+    o.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+}
+// Same rules as plugins/worker-tasks/args.js: int (min/max), enum (options), text (pattern, max 200).
+fn check_args(def: &Value, given: &Value) -> Result<Vec<(String, String)>, String> {
+    let defs = def["args"].as_array().cloned().unwrap_or_default(); let mut out = Vec::new();
+    if let Some(o) = given.as_object() { if o.keys().any(|k| !defs.iter().any(|a| a["name"].as_str() == Some(k))) { return Err("unknown arg".into()); } }
+    for a in &defs {
+        let n = a["name"].as_str().unwrap_or(""); let v = if given[n].is_null() { a["default"].clone() } else { given[n].clone() };
+        let s = match a["type"].as_str() {
+            Some("int") => { let x = v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())).ok_or(format!("{}: not a whole number", n))?;
+                if x < a["min"].as_i64().unwrap_or(i64::MIN) || x > a["max"].as_i64().unwrap_or(i64::MAX) { return Err(format!("{}: out of range", n)); } x.to_string() }
+            Some("enum") => { let x = v.as_str().unwrap_or(""); if !a["options"].as_array().is_some_and(|o| o.iter().any(|y| y.as_str() == Some(x))) { return Err(format!("{}: not an option", n)); } x.to_string() }
+            Some("text") => { let x = v.as_str().unwrap_or("").to_string(); let re = Regex::new(&format!("^(?:{})$", a["pattern"].as_str().unwrap_or("[A-Za-z0-9._-]*"))).map_err(|_| "bad pattern")?;
+                if x.len() > 200 || !re.is_match(&x) { return Err(format!("{}: not allowed", n)); } x }
+            _ => return Err(format!("{}: unknown type", n)),
+        };
+        out.push((n.to_string(), s));
+    }
+    Ok(out)
+}
+fn task_put(v: &Value) -> bool { http("PUT", "/api/p/worker-tasks/box", v.to_string().as_bytes(), false).is_ok() }
+fn run_task(st: &mut St, t: &Value) {
+    let (id, name, args, exp, nonce, sig) = (t["id"].as_str().unwrap_or(""), t["task"].as_str().unwrap_or(""), t["args"].as_str().unwrap_or("{}"), t["exp"].as_u64().unwrap_or(0), t["nonce"].as_str().unwrap_or(""), t["sig"].as_str().unwrap_or(""));
+    let base = json!({"id": id, "nonce": nonce});
+    let fail = |note: &str| { let mut b = base.clone(); b["state"] = json!("failed"); b["note"] = json!(note); task_put(&b); println!("task {} {} refused: {}", id, name, note); };
+    let key = env().get("TASK_KEY").cloned().unwrap_or_default();
+    if key.len() < 16 { return fail("box has no TASK_KEY in .env"); }
+    let want = hmac(key.as_bytes(), format!("{}.{}.{}.{}.{}", id, name, args, exp, nonce).as_bytes());
+    if want.len() != sig.len() || want.bytes().zip(sig.bytes()).fold(0u8, |a, (x, y)| a | (x ^ y)) != 0 { return fail("bad signature"); }
+    if (now() as u64) > exp { return fail("expired"); }
+    let mut seen: Vec<String> = serde_json::from_str(&st.get("task_nonces").unwrap_or_default()).unwrap_or_default();
+    if nonce.len() < 8 || seen.iter().any(|n| n == nonce) { return fail("nonce already used"); }
+    seen.push(nonce.to_string()); if seen.len() > 200 { seen.remove(0); } st.set("task_nonces", &json!(seen).to_string()); st.save();
+    let defs = task_defs(); let Some((_, def, script)) = defs.iter().find(|(_, d, _)| d["name"].as_str() == Some(name)) else { return fail("task not in this box's allowlist") };
+    let a = match check_args(def, &serde_json::from_str(args).unwrap_or(json!({}))) { Ok(a) => a, Err(e) => return fail(&e) };
+    let tmo = def["timeout_s"].as_u64().unwrap_or(30).clamp(1, 600);
+    let mut b = base.clone(); b["state"] = json!("running"); b["instance_id"] = instance()["instance_id"].clone(); task_put(&b);
+    println!("task {} {} running", id, name);
+    // env is wiped: the script sees only PATH, HOME, LANG, GRUGBOX, GRUGBOX_DIR and its TASK_ARG_* values (no tokens)
+    let exe = std::env::current_exe().unwrap_or_default();
+    let mut cmd = Command::new("timeout");
+    cmd.args(["-k", "5", &tmo.to_string(), "nice", "-n", "10", "bash", "-c", "exec bash \"$0\" 2>&1"]).arg(script)
+        .env_clear().env("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin").env("HOME", std::env::var("HOME").unwrap_or_default()).env("LANG", "C.UTF-8")
+        .env("GRUGBOX", &exe).env("GRUGBOX_DIR", dir()).current_dir(dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    for (k, v) in &a { cmd.env(format!("TASK_ARG_{}", k.to_uppercase().replace('-', "_")), v); }
+    let mut ch = match cmd.spawn() { Ok(c) => c, Err(e) => return fail(&format!("could not start: {}", e)) };
+    let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let mut out = ch.stdout.take().unwrap(); let b2 = buf.clone();
+    let rd = std::thread::spawn(move || { let mut x = [0u8; 4096]; while let Ok(n) = out.read(&mut x) { if n == 0 { break; } b2.lock().unwrap().extend_from_slice(&x[..n]); } });
+    let (mut seq, mut total, mut pend) = (0, 0usize, Vec::<u8>::new());
+    let mut flush = |pend: &mut Vec<u8>, all: bool| {
+        let cut = if all { pend.len() } else { pend.iter().rposition(|&c| c == b'\n').map_or(0, |i| i + 1) };
+        if cut == 0 || total > 64 * 1024 { if all { pend.clear(); } return; }
+        let text: String = String::from_utf8_lossy(&pend[..cut]).lines().map(|l| redact(&trunc(l, MAX_LINE)) + "\n").collect();
+        pend.drain(..cut); seq += 1; total += text.len();
+        let mut b = base.clone(); b["seq"] = json!(seq); b["text"] = json!(text); task_put(&b);
+    };
+    let code = loop {
+        std::thread::sleep(Duration::from_millis(1000));
+        pend.extend(buf.lock().unwrap().drain(..)); flush(&mut pend, false);
+        if let Ok(Some(s)) = ch.try_wait() { break s.code().unwrap_or(-1); }
+    };
+    let _ = rd.join(); pend.extend(buf.lock().unwrap().drain(..)); flush(&mut pend, true);
+    let mut b = base.clone(); b["state"] = json!(if code == 0 { "done" } else { "failed" }); b["exit_code"] = json!(code);
+    if code == 124 { b["note"] = json!(format!("timed out after {} s", tmo)); }
+    task_put(&b); println!("task {} {} exit {}", id, name, code);
 }
 
 // ---------- bot activity + token estimates ----------
@@ -579,7 +692,9 @@ fn live(mut until: u64) {
 // ---------- loop ----------
 fn pass(last_ms: u64) -> u64 {
     let t = Instant::now(); let mut st = St::load();
-    ship(&mut st, last_ms); st.save(); bot_sync(&mut st); st.save();
+    let task = ship(&mut st, last_ms); st.save();
+    if let Some(t) = task { run_task(&mut st, &t); st.save(); }
+    bot_sync(&mut st); st.save();
     t.elapsed().as_millis() as u64
 }
 fn lock() -> Option<fs::File> {
@@ -599,6 +714,12 @@ fn run_loop() {
         let co = logs().join("collector.out");
         if fs::metadata(&co).map(|m| m.len()).unwrap_or(0) > 256 * 1024 {
             if let Ok(b) = fs::read(&co) { let tail = &b[b.len() - 64 * 1024..]; let _ = fs::OpenOptions::new().write(true).truncate(true).open(&co).and_then(|mut f| f.write_all(tail)); }
+        }
+        // restart-agent task: re-exec this binary (the lock is close-on-exec, so the new loop takes it)
+        if logs().join(".restart").exists() {
+            let _ = fs::remove_file(logs().join(".restart")); println!("restarting (re-exec)");
+            use std::os::unix::process::CommandExt;
+            if let Ok(exe) = std::env::current_exe() { let e = Command::new(exe).arg("loop").exec(); eprintln!("re-exec failed: {}", e); }
         }
         let (a, b) = settings();
         std::thread::sleep(Duration::from_secs(a.min(b)));
@@ -694,6 +815,8 @@ fn main() {
         "once" => { pass(0); }
         "spool" => { let f = spool_files(); println!("{} batches, {} bytes waiting", f.len(), f.iter().map(|x| x.1).sum::<u64>()); }
         "ensure-running" => ensure_running(),
+        "flush" => { let ok = spool_flush(); let f = spool_files(); println!("{}; {} batches left", if ok { "spool sent" } else { "server not reachable" }, f.len()); }
+        "tasks" => for (p, d, _) in task_defs() { println!("{:16} {:16} {}", p, d["name"].as_str().unwrap_or(""), d["description"].as_str().unwrap_or("")); },
         "reply" => cmd_reply(rest), "confirm" => cmd_confirm(rest), "prompt" => cmd_prompt(rest),
         "log-run" => cmd_log_run(rest), "register" => cmd_register(rest), "logs" => cmd_logs(rest),
         "sample" => println!("{}", sample(900.0)), "os" => println!("{}", os_info()),

@@ -4,6 +4,7 @@
 import { sql, authed, ensureLogs, heartbeat, liveUntil } from "@/lib/db";
 import { gunzipSync } from "zlib";
 import { getSettings } from "@/lib/settings";
+import { enabledPlugins } from "@/plugins";
 export const dynamic="force-dynamic";
 const MAX_ROWS=200000, MAX_BATCH=5000;
 const LEVELS=["debug","info","warn","error"];
@@ -14,8 +15,8 @@ export async function POST(req){
   try{ const buf=Buffer.from(await req.arrayBuffer());
     const raw=(req.headers.get("content-encoding")||"").includes("gzip")||buf[0]===0x1f?gunzipSync(buf,{maxOutputLength:20e6}):buf;
     rows=JSON.parse(raw.toString("utf8")); }catch{ return Response.json({error:"bad body"},{status:400}); }
-  let catalog=null, inst=null;
-  if(rows&&!Array.isArray(rows)){ inst=rows.instance||null; catalog=rows.catalog&&typeof rows.catalog==="object"?rows.catalog:null; rows=Array.isArray(rows.rows)?rows.rows:null; }
+  let catalog=null, inst=null, body=null;
+  if(rows&&!Array.isArray(rows)){ body=rows; inst=rows.instance||null; catalog=rows.catalog&&typeof rows.catalog==="object"?rows.catalog:null; rows=Array.isArray(rows.rows)?rows.rows:null; }
   if(!Array.isArray(rows)) return Response.json({error:"array required"},{status:400});
   rows=rows.slice(0,MAX_BATCH).filter(r=>r&&r.message).map(r=>{ const d=new Date(r.ts); return {
     ts:isNaN(d)?new Date().toISOString():d.toISOString(), source:clean(r.source||"unknown",80),
@@ -26,7 +27,9 @@ export async function POST(req){
   if(rows.length){ const keep=(await getSettings(q)).log_retention_days;
   await q`delete from logs where ts < now() - make_interval(days => ${keep})`;
   await q`delete from logs where id <= (select id from logs order by id desc offset ${MAX_ROWS} limit 1)`; }
-  return Response.json({ok:true,inserted:rows.length,live_until:await liveUntil(q)});
+  // plugins can ride on the ship (no extra wake): e.g. worker-tasks stores the task list and hands over a queued run
+  const extra={}; for(const p of enabledPlugins(await getSettings(q))) if(p.api?.onShip){ try{ Object.assign(extra,await p.api.onShip(q,{iid,body})); }catch(e){ console.error("[plugin]",p.name,e.message); } }
+  return Response.json({ok:true,inserted:rows.length,live_until:await liveUntil(q),...extra});
 }
 
 // Dashboard read (Vercel Authentication protects it). All filters are server-side:

@@ -1,0 +1,7 @@
+{
+  "name": "worker-tasks",
+  "title": "Tasks",
+  "description": "Run small, allowlisted jobs on the box from the dashboard (restart the agent, disk usage, top processes, tail a log). Signed, expiring, no free shell.",
+  "enabled": true,
+  "provides": ["tasks", "page", "api"]
+}

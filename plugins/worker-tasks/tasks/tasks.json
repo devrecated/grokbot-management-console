@@ -1,0 +1,13 @@
+{
+  "tasks": [
+    {"name": "restart-agent", "description": "Restart grugbox (re-exec the loop). Logs and spool are kept.", "script": "restart-agent.sh", "timeout_s": 10, "args": []},
+    {"name": "flush-spool", "description": "Try to send every spooled batch now.", "script": "flush-spool.sh", "timeout_s": 60, "args": []},
+    {"name": "disk-usage", "description": "Free disk space and the size of grugbox's own folder.", "script": "disk-usage.sh", "timeout_s": 30, "args": []},
+    {"name": "list-processes", "description": "Top 15 processes by CPU (name only, no command lines).", "script": "list-processes.sh", "timeout_s": 15, "args": []},
+    {"name": "tail-log", "description": "Last N lines of an allowlisted log file.", "script": "tail-log.sh", "timeout_s": 15,
+     "args": [
+       {"name": "file", "type": "enum", "options": ["collector.out", "dpkg.log", "alternatives.log"], "default": "collector.out"},
+       {"name": "lines", "type": "int", "min": 1, "max": 500, "default": 50}
+     ]}
+  ]
+}

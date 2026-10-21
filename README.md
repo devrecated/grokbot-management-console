@@ -162,6 +162,47 @@ four crates only: `regex`, `serde_json`, `flate2`, `sha2`. no SQLite, no C code.
 
 </details>
 
+## Worker tasks
+
+grug click button on dashboard, small job run on box. not shell. only jobs box already know.
+
+- Tasks tab (`/p/worker-tasks`): pick task, fill args, confirm, run. output show up about every second. history under it.
+- queue live in Postgres (`task_runs`, `task_output`). box not keep line open: grugbox pick up one queued run on its normal ship, so no extra database wake. wait is up to one ship/heartbeat interval.
+- each run signed with HMAC-SHA256 using `TASK_KEY` (same value in box `.env` and dashboard env, never in database or browser). box check signature, expiry (10 min), nonce never seen before, task in its own allowlist (`tasks/<plugin>/tasks.json` next to grugbox), args match their type. any fail = run marked failed, nothing run.
+- script run with `timeout` and `nice`, env wiped (no tokens), args as `TASK_ARG_*` env vars. output redacted like logs, 64 KB max.
+- tasks: `restart-agent` (grugbox re-exec itself after reporting), `flush-spool`, `disk-usage`, `list-processes` (top 15 by CPU, names only), `tail-log` (allowlisted file, N lines).
+- install.sh make `TASK_KEY` in box `.env` if missing (not printed). copy it into Vercel env as `TASK_KEY`, redeploy. no key = Tasks tab say so, nothing run.
+
+### Add your own task
+
+1. put script in `plugins/<plugin>/tasks/` (or `plugins/worker-tasks/tasks/`). read args from `$TASK_ARG_<NAME>`. `$GRUGBOX` is binary, `$GRUGBOX_DIR` its folder.
+2. add it to that `tasks.json`:
+   ```json
+   {"name": "say-hi", "description": "Print hi N times.", "script": "say-hi.sh", "timeout_s": 10,
+    "args": [{"name": "n", "type": "int", "min": 1, "max": 5, "default": 1}]}
+   ```
+   arg types: `int` (min, max), `enum` (options), `text` (pattern regex, max 200 chars). no free text without pattern.
+3. run `box/install.sh` on box. box send new list on next ship; task show in Tasks tab.
+
+## Make grug plugin
+
+plugin = one folder. no framework.
+
+```
+plugins/<name>/
+  plugin.json   {"name": "<name>", "title": "Tab title", "description": "...", "enabled": true, "provides": ["tasks","page","api"]}
+  page.js       optional. server component, gets {q, searchParams, settings}. shows at /p/<name>, gets a tab.
+  api.js        optional. export GET/POST/PUT(req, {q, path}) for /api/p/<name>/<path>;
+                ensure(q) make tables; demo(q) seed demo mode; onShip(q, {iid, body}) ride on box ship and return extra reply fields.
+  tasks/        optional. tasks.json + scripts, copied to box allowlist by install.sh.
+  test/*.test.mjs   required. node:test file, app is running in demo mode at $BASE.
+```
+
+- `node plugins/load.mjs` (run by `npm run dev` and `npm run build`) read every `plugin.json` and write `plugins/index.gen.js`. commit it.
+- Settings page list plugins with on/off. off = no tab, api answer 404, box get nothing from it.
+- `npm run build && npm test` boot app in demo mode, run core tests and every plugin test. plugin with no test = test fail. CI (`.github/workflows/ci.yml`) do same on push and pull request.
+- `plugins/worker-tasks` is example. copy it.
+
 ## Tokens (estimated from transcripts)
 
 Grok Bot not tell box how many tokens it use. so grugbox guess, cheap way:
@@ -315,7 +356,8 @@ grug not snoop. box send only this:
 - loop run at lowest CPU and IO priority. it wake on faster of ship interval (15 s to 10 min) and heartbeat interval (30 s to 10 min), both default 1 min, both in Settings. box re-read settings at most every 5 min. lines only ship when ship interval due. nothing new = no request, just heartbeat.
 - CPU sample is `/proc/stat` difference since last sample. no extra process, no sleep. only first 8 fields count (guest time already inside user time, old code count it twice on VMs). sample after long gap (loop stopped) is dropped, not shown as one big average.
 - Box page: top card = current box (online dot, uptime, OS, grugbox own CPU/memory). then CPU % and memory % charts ([uPlot](https://github.com/leeoniya/uPlot), ~50 kB, the one chart lib here): hover show time + value, time axis in your Settings timezone, 6h/24h/7d/14d. line break only when no heartbeat for over 2x heartbeat interval. Live feed same charts. then small sessions table.
-- session = one boot. Grok Bot box VM often get paused and resumed, not rebooted: same boot id, same session. grugbox spot this (kernel boot time in `/proc/stat` jump forward by time asleep) and Box page show it as "sleeps": breaks inside a session, counted in sessions table.
+- session = one run of box: a boot, or a wake after VM was paused (Grok Bot box VM often get paused and resumed, not rebooted). grugbox spot wake (kernel boot time in `/proc/stat` jump forward by time asleep) and give wake fresh instance id: sha256(machine id, boot id, wake start). so no sleep hole inside a session; hole on chart = between sessions, or box loop stopped.
+- Box page: pick 1h, 6h, 24h, 7d, 14d (window end now, real time axis) or from/to days, and one session or all. lines smoothed. Live show last hour and add raw 2 s points at right edge; old line not wiggle.
 - grugbox also report itself: CPU (% of one core, includes the curl it run), peak memory, pass time. Box page show it in "Console agent" column.
 - top bar dot: green under 2 heartbeats since ping, amber until stale threshold (Settings, default 10 min), grey after. click dot for Box page.
 

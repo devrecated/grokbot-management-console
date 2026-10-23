@@ -4,6 +4,7 @@ node_modules/
 out/
 .env
 .env.*
+!.env.example
 !box/env.example
 *.token
 .token
@@ -17,3 +18,5 @@ npm-debug.log*
 dist/
 __pycache__/
 *.pyc
+.env.local
+.env*.local
